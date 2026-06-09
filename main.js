@@ -3,8 +3,8 @@ const canvas = document.getElementById('canvas');
 const ctx    = canvas.getContext('2d');
 
 // Slider options
-const AMP_VALUES  = [20, 50, 100];         // px (displayed as 2, 5, 10)
-const AMP_LABELS  = ['2', '5', '10'];
+const AMP_VALUES  = [0, 20, 50, 100];      // px (0 = off)
+const AMP_LABELS  = ['0', '2', '5', '10'];
 const FREQ_VALUES = [0.25, 0.5, 1.0, 2.0]; // Hz
 const FREQ_LABELS = [
   '<span class="frac"><span class="num">1</span><span class="den">4</span></span>',
@@ -15,7 +15,6 @@ const FREQ_LABELS = [
 
 let amplitude = AMP_VALUES[0];
 let frequency = FREQ_VALUES[0];
-let running   = false;
 
 // Phase accumulator — keeps driver position continuous across freq/amp changes
 let phase = 0;
@@ -71,12 +70,8 @@ function step() {
             + CFL2 * (cur[i + 1] - 2 * cur[i] + cur[i - 1]);
   }
 
-  if (running) {
-    phase += 2 * Math.PI * frequency * DT;
-    next[0] = amplitude * Math.sin(phase);
-  } else {
-    next[0] = 2 * cur[0] - prev[0] + CFL2 * (cur[1] - cur[0]);
-  }
+  phase += 2 * Math.PI * frequency * DT;
+  next[0] = amplitude * Math.sin(phase);
 
   next[N - 1] = cur[N - 2] + MUR * (next[N - 2] - cur[N - 1]);
 
@@ -109,7 +104,7 @@ function draw(alpha) {
   const y0 = cy + (prev[0] + (cur[0] - prev[0]) * alpha);
 
   // Tilting stick
-  ctx.strokeStyle = running ? '#444' : '#bbb';
+  ctx.strokeStyle = amplitude > 0 ? '#444' : '#bbb';
   ctx.lineWidth   = 3;
   ctx.lineCap     = 'round';
   ctx.beginPath();
@@ -164,7 +159,8 @@ function setupTrack(trackId, valuesId, values, initial, onChange, labels) {
 }
 
 setupTrack('amp-track', 'amp-values', AMP_VALUES, 0, v => {
-  if (running && v !== 0) {
+  if (v !== 0 && amplitude !== 0) {
+    // Keep driver position continuous when switching between non-zero amplitudes
     const pos   = amplitude * Math.sin(phase);
     const ratio = Math.max(-1, Math.min(1, pos / v));
     phase = Math.asin(ratio);
@@ -176,15 +172,6 @@ setupTrack('amp-track', 'amp-values', AMP_VALUES, 0, v => {
 setupTrack('freq-track', 'freq-values', FREQ_VALUES, 0, v => {
   frequency = v;
 }, FREQ_LABELS);
-
-// On/off
-const onBtn = document.getElementById('on-btn');
-onBtn.addEventListener('click', () => {
-  running = !running;
-  if (running) phase = 0;
-  onBtn.classList.toggle('active', running);
-  onBtn.textContent = running ? 'ON' : 'OFF';
-});
 
 // Speed slider: turtle (1/8 speed) → rabbit (real time)
 // Physics CFL is untouched — only playback rate changes

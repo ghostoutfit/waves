@@ -38,34 +38,6 @@ canvas {
   pointer-events: all;
 }
 
-/* ── On/Off button ──────────────────────────────── */
-.on-btn {
-  align-self: center;
-  padding: 7px 16px;
-  background: transparent;
-  border: 2px solid #aaa;
-  border-radius: 6px;
-  color: #888;
-  font-family: 'Courier New', Courier, monospace;
-  font-size: 11px;
-  font-weight: bold;
-  letter-spacing: 0.15em;
-  cursor: pointer;
-  transition: background 0.12s, border-color 0.12s, color 0.12s, box-shadow 0.12s;
-  white-space: nowrap;
-}
-
-.on-btn:hover {
-  border-color: #555;
-  color: #333;
-}
-
-.on-btn.active {
-  background: #222;
-  border-color: #222;
-  color: #fff;
-  box-shadow: 0 0 0 3px rgba(0,0,0,0.12);
-}
 
 /* ── Control groups ─────────────────────────────── */
 .ctrl-group {
@@ -90,9 +62,6 @@ canvas {
   width: 120px;
 }
 
-#amp-track {
-  width: 80px;
-}
 
 .track-line {
   position: absolute;
@@ -140,9 +109,6 @@ canvas {
   column-gap: 6px;
 }
 
-#amp-values {
-  width: 80px; /* 3-notch track is narrower than 4-notch */
-}
 
 .step-values span {
   font-size: 16px;
