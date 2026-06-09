@@ -1,0 +1,112 @@
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  background: #111;
+  overflow: hidden;
+  font-family: 'Courier New', Courier, monospace;
+  height: 100vh;
+}
+
+#app {
+  display: flex;
+  width: 100vw;
+  height: 100vh;
+}
+
+/* ── Control panel ──────────────────────────────── */
+#panel {
+  width: 190px;
+  flex-shrink: 0;
+  background: #1a1b26;
+  border-right: 2px solid #2a2b3a;
+  padding: 28px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 36px;
+  user-select: none;
+}
+
+.panel-title {
+  color: #6e7aaa;
+  font-size: 11px;
+  font-weight: bold;
+  letter-spacing: 0.25em;
+  text-align: center;
+  padding-bottom: 14px;
+  border-bottom: 1px solid #2a2b3a;
+}
+
+.control {}
+
+.control-label {
+  color: #555e7a;
+  font-size: 9px;
+  letter-spacing: 0.18em;
+  margin-bottom: 14px;
+}
+
+/* ── Step track ─────────────────────────────────── */
+.step-track {
+  position: relative;
+  height: 28px;
+  display: flex;
+  align-items: center;
+}
+
+.track-line {
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  height: 2px;
+  background: #2e3048;
+  border-radius: 1px;
+}
+
+.notches {
+  position: relative;
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+}
+
+.notch {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #22243a;
+  border: 2px solid #3a3d5c;
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s, box-shadow 0.12s;
+  position: relative;
+  z-index: 1;
+}
+
+.notch:hover {
+  border-color: #6e7aaa;
+}
+
+.notch.active {
+  background: #c8ccff;
+  border-color: #8890dd;
+  box-shadow: 0 0 0 3px rgba(136,144,221,0.25), 0 0 10px rgba(136,144,221,0.4);
+}
+
+.step-values {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 6px;
+}
+
+.step-values span {
+  font-size: 8px;
+  color: #404460;
+  width: 18px;
+  text-align: center;
+  letter-spacing: 0;
+}
+
+/* ── Canvas ─────────────────────────────────────── */
+canvas {
+  flex: 1;
+  display: block;
+}

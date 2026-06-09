@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Wave on a String</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="app">
+    <div id="panel">
+      <div class="panel-title">DRIVER</div>
+
+      <div class="control">
+        <div class="control-label">AMPLITUDE</div>
+        <div class="step-track" id="amp-track">
+          <div class="track-line"></div>
+          <div class="notches">
+            <button class="notch active" data-index="0"></button>
+            <button class="notch" data-index="1"></button>
+            <button class="notch" data-index="2"></button>
+            <button class="notch" data-index="3"></button>
+          </div>
+        </div>
+        <div class="step-values" id="amp-values"></div>
+      </div>
+
+      <div class="control">
+        <div class="control-label">FREQUENCY</div>
+        <div class="step-track" id="freq-track">
+          <div class="track-line"></div>
+          <div class="notches">
+            <button class="notch active" data-index="0"></button>
+            <button class="notch" data-index="1"></button>
+            <button class="notch" data-index="2"></button>
+            <button class="notch" data-index="3"></button>
+          </div>
+        </div>
+        <div class="step-values" id="freq-values"></div>
+      </div>
+    </div>
+
+    <canvas id="canvas"></canvas>
+  </div>
+  <script src="main.js"></script>
+</body>
+</html>
