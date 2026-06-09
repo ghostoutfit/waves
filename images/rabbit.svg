@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <!-- ears -->
+  <ellipse cx="35" cy="22" rx="7" ry="18" fill="black" transform="rotate(-10 35 22)"/>
+  <ellipse cx="55" cy="18" rx="7" ry="18" fill="black" transform="rotate(10 55 18)"/>
+  <!-- head -->
+  <ellipse cx="45" cy="44" rx="18" ry="16" fill="black"/>
+  <!-- body -->
+  <ellipse cx="45" cy="72" rx="22" ry="20" fill="black"/>
+  <!-- tail -->
+  <circle cx="67" cy="78" r="7" fill="black"/>
+  <!-- back leg -->
+  <ellipse cx="58" cy="88" rx="14" ry="7" fill="black" transform="rotate(-20 58 88)"/>
+  <!-- front leg -->
+  <ellipse cx="34" cy="88" rx="8" ry="5" fill="black" transform="rotate(15 34 88)"/>
+</svg>

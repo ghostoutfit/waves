@@ -4,43 +4,52 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Wave on a String</title>
+  <link rel="icon" type="image/svg+xml" href="favicon.svg">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
   <div id="app">
-    <div id="panel">
-      <div class="panel-title">DRIVER</div>
+    <canvas id="canvas"></canvas>
 
-      <div class="control">
-        <div class="control-label">AMPLITUDE</div>
+    <div id="controls">
+      <button id="on-btn" class="on-btn">OFF</button>
+
+      <div class="ctrl-group">
+        <div class="ctrl-label">AMPLITUDE</div>
         <div class="step-track" id="amp-track">
           <div class="track-line"></div>
           <div class="notches">
-            <button class="notch active" data-index="0"></button>
-            <button class="notch" data-index="1"></button>
-            <button class="notch" data-index="2"></button>
-            <button class="notch" data-index="3"></button>
+            <button class="notch active"></button>
+            <button class="notch"></button>
+            <button class="notch"></button>
           </div>
         </div>
         <div class="step-values" id="amp-values"></div>
       </div>
 
-      <div class="control">
-        <div class="control-label">FREQUENCY</div>
+      <div class="ctrl-group">
+        <div class="ctrl-label">FREQUENCY</div>
         <div class="step-track" id="freq-track">
           <div class="track-line"></div>
           <div class="notches">
-            <button class="notch active" data-index="0"></button>
-            <button class="notch" data-index="1"></button>
-            <button class="notch" data-index="2"></button>
-            <button class="notch" data-index="3"></button>
+            <button class="notch active"></button>
+            <button class="notch"></button>
+            <button class="notch"></button>
+            <button class="notch"></button>
           </div>
         </div>
         <div class="step-values" id="freq-values"></div>
       </div>
-    </div>
 
-    <canvas id="canvas"></canvas>
+      <div class="ctrl-group speed-group">
+        <div class="ctrl-label">SPEED</div>
+        <div class="speed-row">
+          <img class="speed-icon turtle-icon" src="images/Turtle.png" alt="slow">
+          <input type="range" id="speed-slider" min="1" max="8" value="8">
+          <span class="speed-icon rabbit-icon">🐇</span>
+        </div>
+      </div>
+    </div>
   </div>
   <script src="main.js"></script>
 </body>
