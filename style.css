@@ -90,6 +90,10 @@ canvas {
   width: 120px;
 }
 
+#amp-track {
+  width: 80px;
+}
+
 .track-line {
   position: absolute;
   left: 8px;
@@ -134,6 +138,10 @@ canvas {
   align-items: center;
   width: 120px;
   column-gap: 6px;
+}
+
+#amp-values {
+  width: 80px; /* 3-notch track is narrower than 4-notch */
 }
 
 .step-values span {
