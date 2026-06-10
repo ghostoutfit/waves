@@ -28,7 +28,7 @@ canvas {
   transform: translateX(-50%);
   display: flex;
   align-items: flex-start;
-  gap: 28px;
+  gap: 56px;
   background: rgba(247,246,240,0.82);
   backdrop-filter: blur(6px);
   border: 1.5px solid rgba(0,0,0,0.13);
@@ -59,7 +59,7 @@ canvas {
   height: 22px;
   display: flex;
   align-items: center;
-  width: 240px;
+  width: 156px;
 }
 
 
@@ -105,7 +105,7 @@ canvas {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  width: 240px;
+  width: 156px;
   column-gap: 6px;
 }
 
