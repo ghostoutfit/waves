@@ -13,6 +13,7 @@
   --notch-active-bg:#222;
   --slider-track:   #ccc;
   --slider-thumb:   #222;
+  --btn-fg:         #222;
   --btn-border:     #aaa;
   --btn-hover-bg:   rgba(0,0,0,0.05);
   --btn-active-bg:  #222;
@@ -33,6 +34,7 @@ body.dark {
   --notch-active-bg:#ddd;
   --slider-track:   #444;
   --slider-thumb:   #ddd;
+  --btn-fg:         #ddd;
   --btn-border:     #666;
   --btn-hover-bg:   rgba(255,255,255,0.07);
   --btn-active-bg:  #ddd;
@@ -235,7 +237,7 @@ body.dark .theme-dark-box {
   cursor: pointer;
   transition: background 0.1s, border-color 0.1s;
   line-height: 1;
-  color: inherit;
+  color: var(--btn-fg);
 }
 
 #pause-btn.active { font-size: 14px; }
