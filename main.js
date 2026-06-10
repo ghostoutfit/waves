@@ -13,8 +13,9 @@ const FREQ_LABELS = [
   '2',
 ];
 
-let amplitude = AMP_VALUES[0];
-let frequency = FREQ_VALUES[0];
+let amplitude       = AMP_VALUES[0];
+let targetAmplitude = AMP_VALUES[0];
+let frequency       = FREQ_VALUES[0];
 
 // Phase accumulator — keeps driver position continuous across freq/amp changes
 let phase = 0;
@@ -70,6 +71,9 @@ function step() {
             + CFL2 * (cur[i + 1] - 2 * cur[i] + cur[i - 1]);
   }
 
+  // Smoothly track target amplitude to avoid shock discontinuities
+  amplitude += (targetAmplitude - amplitude) * 0.05;
+
   phase += 2 * Math.PI * frequency * DT;
   next[0] = amplitude * Math.sin(phase);
 
@@ -104,7 +108,7 @@ function draw(alpha) {
   const y0 = cy + (prev[0] + (cur[0] - prev[0]) * alpha);
 
   // Tilting stick
-  ctx.strokeStyle = amplitude > 0 ? '#444' : '#bbb';
+  ctx.strokeStyle = targetAmplitude > 0 ? '#444' : '#bbb';
   ctx.lineWidth   = 3;
   ctx.lineCap     = 'round';
   ctx.beginPath();
@@ -159,14 +163,7 @@ function setupTrack(trackId, valuesId, values, initial, onChange, labels) {
 }
 
 setupTrack('amp-track', 'amp-values', AMP_VALUES, 0, v => {
-  if (v !== 0 && amplitude !== 0) {
-    // Keep driver position continuous when switching between non-zero amplitudes
-    const pos   = amplitude * Math.sin(phase);
-    const ratio = Math.max(-1, Math.min(1, pos / v));
-    phase = Math.asin(ratio);
-    if (amplitude * Math.cos(phase) < 0) phase = Math.PI - phase;
-  }
-  amplitude = v;
+  targetAmplitude = v;
 }, AMP_LABELS);
 
 setupTrack('freq-track', 'freq-values', FREQ_VALUES, 0, v => {
