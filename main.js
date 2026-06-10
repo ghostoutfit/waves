@@ -25,6 +25,7 @@ let phase = 0;
 let speedFactor = 1.0;
 let simAccum    = 0;
 let paused      = false;
+let darkMode    = false;
 
 // Physics — CFL fixed; wave speed set here, never by the speed slider
 const OFFSET  = 110;    // px from left edge before first particle
@@ -45,9 +46,9 @@ let particleColors = null;
 
 // ── Colour ───────────────────────────────────────────────────
 function particleColor(i) {
-  if (i % 20 === 0) return '#111111';
+  if (i % 20 === 0) return darkMode ? '#eeeeee' : '#111111';
   const hue = Math.round((i % 20) / 20 * 360);
-  return `hsl(${hue},100%,45%)`;
+  return `hsl(${hue},100%,${darkMode ? 65 : 45}%)`;
 }
 
 // ── Resize ───────────────────────────────────────────────────
@@ -95,10 +96,10 @@ function draw(alpha) {
 
   ctx.clearRect(0, 0, W, H);
 
-  ctx.fillStyle = '#f7f6f0';
+  ctx.fillStyle = darkMode ? '#111' : '#f7f6f0';
   ctx.fillRect(0, 0, W, H);
 
-  ctx.strokeStyle = 'rgba(0,0,0,0.08)';
+  ctx.strokeStyle = darkMode ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)';
   ctx.lineWidth   = 1;
   ctx.beginPath();
   ctx.moveTo(0, cy);
@@ -109,7 +110,9 @@ function draw(alpha) {
   const y0 = cy + (prev[0] + (cur[0] - prev[0]) * alpha);
 
   // Tilting stick
-  ctx.strokeStyle = targetAmplitude > 0 ? '#444' : '#bbb';
+  ctx.strokeStyle = targetAmplitude > 0
+    ? (darkMode ? '#bbb' : '#444')
+    : (darkMode ? '#444' : '#bbb');
   ctx.lineWidth   = 3;
   ctx.lineCap     = 'round';
   ctx.beginPath();
@@ -193,6 +196,17 @@ pauseBtn.addEventListener('click', () => {
 stepBtn.addEventListener('click', () => {
   step();
   draw(1);
+});
+
+// Theme toggle
+document.getElementById('theme-btn').addEventListener('click', () => {
+  darkMode = !darkMode;
+  document.body.classList.toggle('dark', darkMode);
+  document.getElementById('theme-btn').textContent = darkMode ? '☀️' : '🌙';
+  // Rebuild particle colors for new theme
+  if (particleColors) {
+    for (let i = 0; i < N; i++) particleColors[i] = particleColor(i);
+  }
 });
 
 // ── Init ─────────────────────────────────────────────────────

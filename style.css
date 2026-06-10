@@ -1,7 +1,47 @@
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
+:root {
+  --bg:             #f7f6f0;
+  --panel-bg:       rgba(247,246,240,0.85);
+  --panel-border:   rgba(0,0,0,0.13);
+  --label:          #555;
+  --value:          #777;
+  --track-line:     #ccc;
+  --notch-bg:       #f7f6f0;
+  --notch-border:   #aaa;
+  --notch-hover:    #444;
+  --notch-active-bg:#222;
+  --slider-track:   #ccc;
+  --slider-thumb:   #222;
+  --btn-border:     #aaa;
+  --btn-hover-bg:   rgba(0,0,0,0.05);
+  --btn-active-bg:  #222;
+  --btn-active-fg:  #fff;
+  --frac-border:    #777;
+}
+
+body.dark {
+  --bg:             #111;
+  --panel-bg:       rgba(18,18,20,0.90);
+  --panel-border:   rgba(255,255,255,0.12);
+  --label:          #999;
+  --value:          #888;
+  --track-line:     #444;
+  --notch-bg:       #1a1a1c;
+  --notch-border:   #666;
+  --notch-hover:    #ccc;
+  --notch-active-bg:#ddd;
+  --slider-track:   #444;
+  --slider-thumb:   #ddd;
+  --btn-border:     #666;
+  --btn-hover-bg:   rgba(255,255,255,0.07);
+  --btn-active-bg:  #ddd;
+  --btn-active-fg:  #111;
+  --frac-border:    #888;
+}
+
 body {
-  background: #f7f6f0;
+  background: var(--bg);
   overflow: hidden;
   font-family: 'Courier New', Courier, monospace;
   height: 100vh;
@@ -29,15 +69,14 @@ canvas {
   display: flex;
   align-items: flex-start;
   gap: 56px;
-  background: rgba(247,246,240,0.82);
+  background: var(--panel-bg);
   backdrop-filter: blur(6px);
-  border: 1.5px solid rgba(0,0,0,0.13);
+  border: 1.5px solid var(--panel-border);
   border-radius: 12px;
   padding: 12px 20px 10px;
   user-select: none;
   pointer-events: all;
 }
-
 
 /* ── Control groups ─────────────────────────────── */
 .ctrl-group {
@@ -46,12 +85,30 @@ canvas {
   gap: 6px;
 }
 
+.ctrl-label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
 .ctrl-label {
-  color: #555;
+  color: var(--label);
   font-size: 16px;
   letter-spacing: 0.2em;
   font-weight: bold;
 }
+
+/* ── Theme toggle ───────────────────────────────── */
+.theme-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 14px;
+  padding: 0 0 0 8px;
+  line-height: 1;
+  opacity: 0.7;
+}
+.theme-btn:hover { opacity: 1; }
 
 /* ── Step track ─────────────────────────────────── */
 .step-track {
@@ -62,13 +119,12 @@ canvas {
   width: 156px;
 }
 
-
 .track-line {
   position: absolute;
   left: 8px;
   right: 8px;
   height: 2px;
-  background: #ccc;
+  background: var(--track-line);
   border-radius: 1px;
 }
 
@@ -83,22 +139,20 @@ canvas {
   width: 16px;
   height: 16px;
   border-radius: 50%;
-  background: #f7f6f0;
-  border: 2px solid #aaa;
+  background: var(--notch-bg);
+  border: 2px solid var(--notch-border);
   cursor: pointer;
   transition: background 0.12s, border-color 0.12s, box-shadow 0.12s;
   position: relative;
   z-index: 1;
 }
 
-.notch:hover {
-  border-color: #444;
-}
+.notch:hover  { border-color: var(--notch-hover); }
 
 .notch.active {
-  background: #222;
-  border-color: #222;
-  box-shadow: 0 0 0 3px rgba(0,0,0,0.12);
+  background: var(--notch-active-bg);
+  border-color: var(--notch-active-bg);
+  box-shadow: 0 0 0 3px rgba(128,128,128,0.2);
 }
 
 .step-values {
@@ -110,11 +164,10 @@ canvas {
   column-gap: 6px;
 }
 
-
 .step-values span {
   font-size: 16px;
   font-weight: bold;
-  color: #777;
+  color: var(--value);
   width: 16px;
   text-align: center;
   letter-spacing: 0;
@@ -130,14 +183,12 @@ canvas {
 }
 
 .frac .num {
-  border-bottom: 1.5px solid #777;
+  border-bottom: 1.5px solid var(--frac-border);
   width: 100%;
   text-align: center;
 }
 
-.frac .den {
-  text-align: center;
-}
+.frac .den { text-align: center; }
 
 /* ── Transport buttons ──────────────────────────── */
 .transport-row {
@@ -150,33 +201,30 @@ canvas {
   flex: 1;
   padding: 4px 0;
   background: transparent;
-  border: 1.5px solid #aaa;
+  border: 1.5px solid var(--btn-border);
   border-radius: 5px;
   font-size: 22px;
   cursor: pointer;
   transition: background 0.1s, border-color 0.1s;
   line-height: 1;
+  color: inherit;
 }
 
-#pause-btn.active {
-  font-size: 14px;
-}
+#pause-btn.active { font-size: 14px; }
 
 .transport-btn:hover {
-  border-color: #444;
-  background: rgba(0,0,0,0.05);
+  border-color: var(--notch-hover);
+  background: var(--btn-hover-bg);
 }
 
 .transport-btn.active {
-  background: #222;
-  border-color: #222;
-  color: #fff;
+  background: var(--btn-active-bg);
+  border-color: var(--btn-active-bg);
+  color: var(--btn-active-fg);
 }
 
 /* ── Speed slider ───────────────────────────────── */
-.speed-group {
-  min-width: 140px;
-}
+.speed-group { min-width: 140px; }
 
 .speed-row {
   display: flex;
@@ -191,9 +239,9 @@ canvas {
   filter: brightness(0);
 }
 
-.turtle-icon {
-  height: 18px;
-}
+body.dark .speed-icon { filter: brightness(10); }
+
+.turtle-icon { height: 18px; }
 
 .rabbit-icon {
   font-size: 20px;
@@ -203,12 +251,14 @@ canvas {
   height: auto;
 }
 
+body.dark .rabbit-icon { filter: brightness(10); }
+
 #speed-slider {
   flex: 1;
   -webkit-appearance: none;
   appearance: none;
   height: 4px;
-  background: #ccc;
+  background: var(--slider-track);
   border-radius: 2px;
   outline: none;
   cursor: pointer;
@@ -220,17 +270,17 @@ canvas {
   width: 16px;
   height: 16px;
   border-radius: 50%;
-  background: #222;
-  border: 2px solid #222;
+  background: var(--slider-thumb);
+  border: 2px solid var(--slider-thumb);
   cursor: pointer;
-  box-shadow: 0 0 0 3px rgba(0,0,0,0.10);
+  box-shadow: 0 0 0 3px rgba(128,128,128,0.15);
 }
 
 #speed-slider::-moz-range-thumb {
   width: 16px;
   height: 16px;
   border-radius: 50%;
-  background: #222;
-  border: 2px solid #222;
+  background: var(--slider-thumb);
+  border: 2px solid var(--slider-thumb);
   cursor: pointer;
 }
