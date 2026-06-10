@@ -24,6 +24,7 @@ let phase = 0;
 // Interpolation between prev and cur keeps rendering smooth below 1 step/frame
 let speedFactor = 1.0;
 let simAccum    = 0;
+let paused      = false;
 
 // Physics — CFL fixed; wave speed set here, never by the speed slider
 const OFFSET  = 110;    // px from left edge before first particle
@@ -130,13 +131,14 @@ function draw(alpha) {
 
 // ── Loop ─────────────────────────────────────────────────────
 function loop() {
-  simAccum += speedFactor;
-  while (simAccum >= 1) {
-    step();
-    simAccum -= 1;
+  if (!paused) {
+    simAccum += speedFactor;
+    while (simAccum >= 1) {
+      step();
+      simAccum -= 1;
+    }
   }
-  // alpha: how far we are between the last step and the next one
-  draw(simAccum); // simAccum is always in [0,1) — use directly as blend alpha
+  draw(simAccum);
   requestAnimationFrame(loop);
 }
 
@@ -175,6 +177,22 @@ setupTrack('freq-track', 'freq-values', FREQ_VALUES, 0, v => {
 const speedSlider = document.getElementById('speed-slider');
 speedSlider.addEventListener('input', () => {
   speedFactor = Number(speedSlider.value) / 8; // 1→0.125, 8→1.0
+});
+
+// Pause / step
+const pauseBtn = document.getElementById('pause-btn');
+const stepBtn  = document.getElementById('step-btn');
+
+pauseBtn.addEventListener('click', () => {
+  paused = !paused;
+  simAccum = 0; // avoid burst of steps on resume
+  pauseBtn.classList.toggle('active', paused);
+  pauseBtn.textContent = paused ? '▶' : '⏸';
+});
+
+stepBtn.addEventListener('click', () => {
+  step();
+  draw(1);
 });
 
 // ── Init ─────────────────────────────────────────────────────

@@ -139,6 +139,36 @@ canvas {
   text-align: center;
 }
 
+/* ── Transport buttons ──────────────────────────── */
+.transport-row {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.transport-btn {
+  flex: 1;
+  padding: 4px 0;
+  background: transparent;
+  border: 1.5px solid #aaa;
+  border-radius: 5px;
+  font-size: 14px;
+  cursor: pointer;
+  transition: background 0.1s, border-color 0.1s;
+  line-height: 1;
+}
+
+.transport-btn:hover {
+  border-color: #444;
+  background: rgba(0,0,0,0.05);
+}
+
+.transport-btn.active {
+  background: #222;
+  border-color: #222;
+  color: #fff;
+}
+
 /* ── Speed slider ───────────────────────────────── */
 .speed-group {
   min-width: 140px;
