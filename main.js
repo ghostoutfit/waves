@@ -202,7 +202,6 @@ stepBtn.addEventListener('click', () => {
 document.getElementById('theme-btn').addEventListener('click', () => {
   darkMode = !darkMode;
   document.body.classList.toggle('dark', darkMode);
-  document.getElementById('theme-btn').textContent = darkMode ? '☀️' : '🌙';
   // Rebuild particle colors for new theme
   if (particleColors) {
     for (let i = 0; i < N; i++) particleColors[i] = particleColor(i);
