@@ -152,10 +152,14 @@ canvas {
   background: transparent;
   border: 1.5px solid #aaa;
   border-radius: 5px;
-  font-size: 14px;
+  font-size: 22px;
   cursor: pointer;
   transition: background 0.1s, border-color 0.1s;
   line-height: 1;
+}
+
+#pause-btn.active {
+  font-size: 14px;
 }
 
 .transport-btn:hover {
