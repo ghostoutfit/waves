@@ -106,6 +106,7 @@ canvas {
   justify-content: space-between;
   align-items: center;
   width: 156px;
+  height: 34px;
   column-gap: 6px;
 }
 
