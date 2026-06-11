@@ -3,8 +3,8 @@ const canvas = document.getElementById('canvas');
 const ctx    = canvas.getContext('2d');
 
 // Slider options
-const AMP_VALUES  = [0, 20, 50, 100];      // px (0 = off)
-const AMP_LABELS  = ['0', '2', '5', '10'];
+const AMP_VALUES  = [0, 30, 60, 120];      // px (0 = off) — 1/2/4 grid boxes
+const AMP_LABELS  = ['0', '1', '2', '4'];
 const FREQ_VALUES = [0.25, 0.5, 1.0, 2.0]; // Hz
 const FREQ_LABELS = [
   '<span class="frac"><span class="num">1</span><span class="den">4</span></span>',
@@ -29,7 +29,15 @@ let darkMode    = false;
 
 // Physics — CFL fixed; wave speed set here, never by the speed slider
 const OFFSET  = 110;    // px from left edge before first particle
-const SPACING = 11;     // px between particle centres
+const SPACING = 10;     // px between particle centres (was 11; wave speed 264→240 px/s)
+// Grid — wave speed = CFL*SPACING*FPS = 0.4*10*60 = 240 px/s
+// GRID_W = λ at 2 Hz = 240/2 = 120 = 12*SPACING
+// GRID_H = 30 px → minor box = 30×30 (square); divides AMP_VALUES as 1/2/4 boxes
+// Major line every 4 minor boxes (120 px wide × 120 px tall)
+const GRID_W    = 120;
+const GRID_H    = 30;
+const GRID_MINOR = GRID_W / 4;  // 30 px — minor grid subdivision
+const CY_OFFSET = 2 * GRID_H;  // shift equilibrium line down 2 boxes
 const RADIUS  = 5;
 const FPS     = 60;
 const DT      = 1 / FPS;
@@ -66,6 +74,45 @@ const TIE_H = 18;  // half-height (px)
 let ties = []; // { x, y, particleIndex (-1=unattached), dragging, dragOffX, dragOffY }
 let paletteCupCtx = null;
 let paletteTieCtx = null;
+
+// ── Audio ─────────────────────────────────────────────────────
+let soundEnabled = true;
+let audioCtx = null;
+
+function getAudioCtx() {
+  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  return audioCtx;
+}
+
+function playSmack(intensity) {
+  // intensity: avg particle velocity magnitude at impact (px/step), typically 1–15
+  if (!soundEnabled) return;
+  const ac = getAudioCtx();
+
+  const duration = 0.09; // seconds
+  const bufLen   = Math.ceil(ac.sampleRate * duration);
+  const buffer   = ac.createBuffer(1, bufLen, ac.sampleRate);
+  const data     = buffer.getChannelData(0);
+  for (let i = 0; i < bufLen; i++) data[i] = Math.random() * 2 - 1;
+
+  const source = ac.createBufferSource();
+  source.buffer = buffer;
+
+  const filter = ac.createBiquadFilter();
+  filter.type            = 'bandpass';
+  filter.frequency.value = 900;
+  filter.Q.value         = 0.6;
+
+  const gain = ac.createGain();
+  const vol  = Math.min(1.0, intensity / 10); // 10 px/step → full volume
+  gain.gain.setValueAtTime(vol, ac.currentTime);
+  gain.gain.exponentialRampToValueAtTime(0.001, ac.currentTime + duration);
+
+  source.connect(filter);
+  filter.connect(gain);
+  gain.connect(ac.destination);
+  source.start();
+}
 
 // ── Colour ───────────────────────────────────────────────────
 function particleColor(i) {
@@ -209,7 +256,7 @@ function drawTieAt(c, x, y) {
 }
 
 function drawTies(alpha) {
-  const cy = canvas.height / 2;
+  const cy = canvas.height / 2 + CY_OFFSET;
   for (const tie of ties) {
     let y;
     if (tie.dragging) {
@@ -280,7 +327,7 @@ function resize() {
 
   if (cup.resting && !cup.dragging && !cup.inPalette) {
     cup.x = canvas.width - 80;
-    cup.y = canvas.height / 2;
+    cup.y = canvas.height / 2 + CY_OFFSET;
   }
 }
 
@@ -303,7 +350,7 @@ function step() {
   // Cup occupies y-band [upperEdge, lowerEdge] in displacement coords.
   // Any particle entering that band is reflected; its velocity becomes the cup's.
   if (!cup.dragging) {
-    const cy         = canvas.height / 2;
+    const cy         = canvas.height / 2 + CY_OFFSET;
     const lowerEdge  = cup.y - cy;           // cup base (larger y on screen)
     const upperEdge  = cup.y - CUP_H - cy;  // cup rim  (smaller y on screen)
     const iLeft  = Math.max(1, Math.floor((cup.x - CUP_TW - OFFSET) / SPACING));
@@ -323,9 +370,11 @@ function step() {
     }
 
     if (hits > 0) {
-      cup.vy      = velSum / hits;              // cup matches particle velocity
-      cup.vx      = Math.abs(cup.vy) * 0.3;    // small push in wave-travel direction
+      const avgVel = velSum / hits;
+      cup.vy      = avgVel;
+      cup.vx      = Math.abs(cup.vy) * 0.3;
       cup.resting = false;
+      playSmack(Math.abs(avgVel));
     }
   }
 
@@ -341,24 +390,58 @@ function step() {
   next = tmp;
 }
 
+// ── Grid ─────────────────────────────────────────────────────
+function drawGrid() {
+  const W = canvas.width, H = canvas.height, cy = H / 2 + CY_OFFSET;
+  ctx.save();
+
+  // Minor lines (every GRID_MINOR = 30 px) — skip positions that fall on major lines
+  ctx.strokeStyle = darkMode ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  for (let x = OFFSET % GRID_MINOR; x <= W; x += GRID_MINOR) {
+    if (Math.round(x - OFFSET) % GRID_W === 0) continue;
+    ctx.moveTo(x, 0); ctx.lineTo(x, H);
+  }
+  for (let y = cy % GRID_MINOR; y <= H; y += GRID_MINOR) {
+    if (Math.round(cy - y) % GRID_W === 0) continue;
+    ctx.moveTo(0, y); ctx.lineTo(W, y);
+  }
+  ctx.stroke();
+
+  // Major lines (every GRID_W = 120 px) — thicker
+  ctx.strokeStyle = darkMode ? 'rgba(255,255,255,0.10)' : 'rgba(0,0,0,0.10)';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  for (let x = OFFSET; x <= W; x += GRID_W) { ctx.moveTo(x, 0); ctx.lineTo(x, H); }
+  for (let x = OFFSET - GRID_W; x >= 0; x -= GRID_W) { ctx.moveTo(x, 0); ctx.lineTo(x, H); }
+  for (let y = cy; y >= 0; y -= GRID_W) { ctx.moveTo(0, y); ctx.lineTo(W, y); }
+  for (let y = cy + GRID_W; y <= H; y += GRID_W) { ctx.moveTo(0, y); ctx.lineTo(W, y); }
+  ctx.stroke();
+
+  // Equilibrium line — most prominent
+  ctx.strokeStyle = darkMode ? 'rgba(255,255,255,0.14)' : 'rgba(0,0,0,0.14)';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.moveTo(0, cy); ctx.lineTo(W, cy);
+  ctx.stroke();
+
+  ctx.restore();
+}
+
 // ── Draw ─────────────────────────────────────────────────────
 // alpha: fraction through current step interval (0–1) for interpolation
 function draw(alpha) {
   const W  = canvas.width;
   const H  = canvas.height;
-  const cy = H / 2;
+  const cy = H / 2 + CY_OFFSET;
 
   ctx.clearRect(0, 0, W, H);
 
   ctx.fillStyle = darkMode ? '#111' : '#f7f6f0';
   ctx.fillRect(0, 0, W, H);
 
-  ctx.strokeStyle = darkMode ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)';
-  ctx.lineWidth   = 1;
-  ctx.beginPath();
-  ctx.moveTo(0, cy);
-  ctx.lineTo(W, cy);
-  ctx.stroke();
+  drawGrid();
 
   // Interpolated position of first particle for stick
   const y0 = cy + (prev[0] + (cur[0] - prev[0]) * alpha);
@@ -481,7 +564,7 @@ canvas.addEventListener('mousedown', e => {
   const [mx, my] = canvasMouse(e);
 
   // Ties take priority
-  const cy = canvas.height / 2;
+  const cy = canvas.height / 2 + CY_OFFSET;
   for (const tie of ties) {
     if (Math.abs(mx - tie.x) < TIE_W + 5 && Math.abs(my - cy) < TIE_H + 5) {
       tie.dragging  = true;
@@ -533,7 +616,7 @@ window.addEventListener('mousemove', e => {
 
   const anyDrag = cup.dragging || ties.some(t => t.dragging);
   if (!anyDrag) {
-    const cy = canvas.height / 2;
+    const cy = canvas.height / 2 + CY_OFFSET;
     const overCup = !cup.inPalette && cupHitTest(mx, my);
     const overTie = ties.some(t => Math.abs(mx - t.x) < TIE_W + 5 && Math.abs(my - cy) < TIE_H + 5);
     canvas.style.cursor = (overCup || overTie) ? 'grab' : 'default';
@@ -561,6 +644,14 @@ window.addEventListener('mouseup', e => {
       ties.splice(i, 1); // dropped off string — discard
     }
   }
+});
+
+document.getElementById('clear-ties-btn').addEventListener('click', () => {
+  ties = [];
+});
+
+document.getElementById('sound-cb').addEventListener('change', e => {
+  soundEnabled = e.target.checked;
 });
 
 // ── Init ─────────────────────────────────────────────────────

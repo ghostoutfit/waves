@@ -82,6 +82,18 @@ body {
 .palette-slot:hover  { border-color: var(--notch-hover); }
 .palette-slot:active { cursor: grabbing; }
 
+.sound-label {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--label);
+  cursor: pointer;
+  user-select: none;
+  letter-spacing: 0.05em;
+}
+
 /* ── Controls overlay ───────────────────────────── */
 #controls {
   position: absolute;
