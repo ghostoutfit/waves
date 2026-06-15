@@ -76,14 +76,19 @@ let paletteCupCtx = null;
 let paletteTieCtx = null;
 
 // ── Drawings ──────────────────────────────────────────────────
-let drawings    = [];    // [{ x1, y1, x2, y2 }]
-let drawMode    = false;
-let activeDraw  = null;  // { x1, y1, x2, y2 } — line being drawn
-let draggedLine = null;  // { index, offX, offY } — line being moved by midpoint
+let drawings        = [];    // [{ x1, y1, x2, y2 }]
+let drawMode        = false;
+let activeDraw      = null;  // { x1, y1, x2, y2 } — line being drawn
+let draggedLine     = null;  // { index, offX, offY } — line being moved by midpoint
+let draggedEndpoint = null;  // { index, which: 1|2 } — endpoint being adjusted
 
-const DRAW_DOT_R  = 4;
-const DRAW_MID_R  = 5;   // midpoint handle radius (drawn)
-const DRAW_MID_HIT = 12; // px grab radius for midpoint
+const DRAW_DOT_R   = 4;
+const DRAW_MID_R   = 5;   // midpoint handle radius (drawn)
+const DRAW_MID_HIT = 12;  // px grab radius for midpoint
+const DRAW_DOT_HIT = 10;  // px grab radius for endpoint dots
+
+const SNAP = GRID_MINOR / 2; // 15 px — half a grid box
+function snap(v) { return Math.round(v / SNAP) * SNAP; }
 
 // ── Audio ─────────────────────────────────────────────────────
 let soundEnabled = true;
@@ -382,6 +387,16 @@ function nearMidpoint(mx, my) {
   return -1;
 }
 
+// Returns { index, which: 1|2 } for the nearest endpoint, or null
+function nearEndpoint(mx, my) {
+  for (let i = 0; i < drawings.length; i++) {
+    const d = drawings[i];
+    if (Math.hypot(mx - d.x1, my - d.y1) < DRAW_DOT_HIT) return { index: i, which: 1 };
+    if (Math.hypot(mx - d.x2, my - d.y2) < DRAW_DOT_HIT) return { index: i, which: 2 };
+  }
+  return null;
+}
+
 // ── Resize ───────────────────────────────────────────────────
 function resize() {
   canvas.width  = canvas.offsetWidth;
@@ -638,8 +653,9 @@ document.getElementById('draw-btn').addEventListener('click', () => {
 document.getElementById('clear-all-btn').addEventListener('click', () => {
   ties      = [];
   drawings  = [];
-  activeDraw = null;
-  draggedLine = null;
+  activeDraw      = null;
+  draggedLine     = null;
+  draggedEndpoint = null;
   cup.inPalette = true;
   cup.vx = cup.vy = 0;
   cup.resting = true;
@@ -660,13 +676,18 @@ canvas.addEventListener('mousedown', e => {
 
   // Draw mode takes priority
   if (drawMode) {
+    const ep = nearEndpoint(mx, my);
+    if (ep) {
+      draggedEndpoint = ep;
+      e.preventDefault(); return;
+    }
     const hitIdx = nearMidpoint(mx, my);
     if (hitIdx >= 0) {
       const m = lineMidpoint(drawings[hitIdx]);
       draggedLine = { index: hitIdx, offX: m.x - mx, offY: m.y - my };
-    } else {
-      activeDraw = { x1: mx, y1: my, x2: mx, y2: my };
+      e.preventDefault(); return;
     }
+    activeDraw = { x1: snap(mx), y1: snap(my), x2: snap(mx), y2: snap(my) };
     e.preventDefault(); return;
   }
 
@@ -717,8 +738,15 @@ window.addEventListener('mousemove', e => {
 
   if (drawMode) {
     if (activeDraw) {
-      activeDraw.x2 = mx;
-      activeDraw.y2 = my;
+      activeDraw.x2 = snap(mx);
+      activeDraw.y2 = snap(my);
+    } else if (draggedEndpoint !== null) {
+      const d = drawings[draggedEndpoint.index];
+      if (draggedEndpoint.which === 1) {
+        drawings[draggedEndpoint.index] = { ...d, x1: snap(mx), y1: snap(my) };
+      } else {
+        drawings[draggedEndpoint.index] = { ...d, x2: snap(mx), y2: snap(my) };
+      }
     } else if (draggedLine !== null) {
       const d = drawings[draggedLine.index];
       const newMidX = mx + draggedLine.offX;
@@ -730,8 +758,9 @@ window.addEventListener('mousemove', e => {
         x2: newMidX + halfDx, y2: newMidY + halfDy,
       };
     } else {
-      // Cursor hint: grab over midpoints, crosshair elsewhere
-      canvas.style.cursor = nearMidpoint(mx, my) >= 0 ? 'grab' : 'crosshair';
+      // Cursor hint: grab over endpoints or midpoints, crosshair elsewhere
+      const overGrab = nearEndpoint(mx, my) !== null || nearMidpoint(mx, my) >= 0;
+      canvas.style.cursor = overGrab ? 'grab' : 'crosshair';
     }
     return;
   }
@@ -761,7 +790,8 @@ window.addEventListener('mouseup', e => {
       }
       activeDraw = null;
     }
-    draggedLine = null;
+    draggedLine     = null;
+    draggedEndpoint = null;
     return;
   }
 

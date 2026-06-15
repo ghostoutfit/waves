@@ -114,9 +114,11 @@ body {
   border-radius: 5px;
   cursor: pointer;
   color: var(--label);
+  font-family: 'Courier New', Courier, monospace;
   font-size: 16px;
   font-weight: bold;
   letter-spacing: 0.2em;
+  white-space: nowrap;
   transition: background 0.1s, border-color 0.1s;
   align-self: stretch;
 }
