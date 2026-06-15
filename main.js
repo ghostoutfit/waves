@@ -75,6 +75,16 @@ let ties = []; // { x, y, particleIndex (-1=unattached), dragging, dragOffX, dra
 let paletteCupCtx = null;
 let paletteTieCtx = null;
 
+// ── Drawings ──────────────────────────────────────────────────
+let drawings    = [];    // [{ x1, y1, x2, y2 }]
+let drawMode    = false;
+let activeDraw  = null;  // { x1, y1, x2, y2 } — line being drawn
+let draggedLine = null;  // { index, offX, offY } — line being moved by midpoint
+
+const DRAW_DOT_R  = 4;
+const DRAW_MID_R  = 5;   // midpoint handle radius (drawn)
+const DRAW_MID_HIT = 12; // px grab radius for midpoint
+
 // ── Audio ─────────────────────────────────────────────────────
 let soundEnabled = true;
 let audioCtx = null;
@@ -311,6 +321,67 @@ function cupHitTest(mx, my) {
   return dx > -(CUP_TW + 6) && dx < (CUP_TW + 6) && dy > -(CUP_H + 6) && dy < 6;
 }
 
+// ── Drawing tool ──────────────────────────────────────────────
+function drawDrawings() {
+  const color = darkMode ? 'rgba(255,255,255,0.85)' : 'rgba(0,0,0,0.75)';
+  const midColor = darkMode ? 'rgba(255,255,255,0.4)' : 'rgba(0,0,0,0.3)';
+
+  ctx.save();
+  ctx.strokeStyle = color;
+  ctx.fillStyle   = color;
+  ctx.lineWidth   = 2;
+  ctx.lineCap     = 'round';
+
+  const allLines = activeDraw ? [...drawings, activeDraw] : drawings;
+
+  for (let i = 0; i < allLines.length; i++) {
+    const d = allLines[i];
+
+    // Line
+    ctx.beginPath();
+    ctx.moveTo(d.x1, d.y1);
+    ctx.lineTo(d.x2, d.y2);
+    ctx.stroke();
+
+    // Start dot
+    ctx.beginPath();
+    ctx.arc(d.x1, d.y1, DRAW_DOT_R, 0, Math.PI * 2);
+    ctx.fill();
+
+    // End dot
+    ctx.beginPath();
+    ctx.arc(d.x2, d.y2, DRAW_DOT_R, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Midpoint grab handle (hollow) — only for completed lines
+    if (i < drawings.length) {
+      const mx = (d.x1 + d.x2) / 2;
+      const my = (d.y1 + d.y2) / 2;
+      ctx.beginPath();
+      ctx.arc(mx, my, DRAW_MID_R, 0, Math.PI * 2);
+      ctx.strokeStyle = midColor;
+      ctx.lineWidth   = 1.5;
+      ctx.stroke();
+      ctx.strokeStyle = color;
+      ctx.lineWidth   = 2;
+    }
+  }
+
+  ctx.restore();
+}
+
+function lineMidpoint(d) {
+  return { x: (d.x1 + d.x2) / 2, y: (d.y1 + d.y2) / 2 };
+}
+
+function nearMidpoint(mx, my) {
+  for (let i = 0; i < drawings.length; i++) {
+    const m = lineMidpoint(drawings[i]);
+    if (Math.hypot(mx - m.x, my - m.y) < DRAW_MID_HIT) return i;
+  }
+  return -1;
+}
+
 // ── Resize ───────────────────────────────────────────────────
 function resize() {
   canvas.width  = canvas.offsetWidth;
@@ -470,6 +541,7 @@ function draw(alpha) {
 
   drawTies(alpha);
   if (!cup.inPalette) drawCup();
+  drawDrawings();
   drawPaletteItems();
 }
 
@@ -550,6 +622,29 @@ document.getElementById('theme-btn').addEventListener('click', () => {
   }
 });
 
+// Sound toggle
+document.getElementById('sound-cb').addEventListener('change', e => {
+  soundEnabled = e.target.checked;
+});
+
+// Draw mode toggle
+document.getElementById('draw-btn').addEventListener('click', () => {
+  drawMode = !drawMode;
+  document.getElementById('draw-btn').classList.toggle('active', drawMode);
+  canvas.style.cursor = drawMode ? 'crosshair' : 'default';
+});
+
+// Clear all
+document.getElementById('clear-all-btn').addEventListener('click', () => {
+  ties      = [];
+  drawings  = [];
+  activeDraw = null;
+  draggedLine = null;
+  cup.inPalette = true;
+  cup.vx = cup.vy = 0;
+  cup.resting = true;
+});
+
 // ── Drag handling ─────────────────────────────────────────────
 function canvasMouse(e) {
   const r = canvas.getBoundingClientRect();
@@ -563,7 +658,19 @@ function canvasMouse(e) {
 canvas.addEventListener('mousedown', e => {
   const [mx, my] = canvasMouse(e);
 
-  // Ties take priority
+  // Draw mode takes priority
+  if (drawMode) {
+    const hitIdx = nearMidpoint(mx, my);
+    if (hitIdx >= 0) {
+      const m = lineMidpoint(drawings[hitIdx]);
+      draggedLine = { index: hitIdx, offX: m.x - mx, offY: m.y - my };
+    } else {
+      activeDraw = { x1: mx, y1: my, x2: mx, y2: my };
+    }
+    e.preventDefault(); return;
+  }
+
+  // Ties take priority over cup
   const cy = canvas.height / 2 + CY_OFFSET;
   for (const tie of ties) {
     if (Math.abs(mx - tie.x) < TIE_W + 5 && Math.abs(my - cy) < TIE_H + 5) {
@@ -608,6 +715,27 @@ document.getElementById('tie-palette').addEventListener('mousedown', e => {
 window.addEventListener('mousemove', e => {
   const [mx, my] = canvasMouse(e);
 
+  if (drawMode) {
+    if (activeDraw) {
+      activeDraw.x2 = mx;
+      activeDraw.y2 = my;
+    } else if (draggedLine !== null) {
+      const d = drawings[draggedLine.index];
+      const newMidX = mx + draggedLine.offX;
+      const newMidY = my + draggedLine.offY;
+      const halfDx = (d.x2 - d.x1) / 2;
+      const halfDy = (d.y2 - d.y1) / 2;
+      drawings[draggedLine.index] = {
+        x1: newMidX - halfDx, y1: newMidY - halfDy,
+        x2: newMidX + halfDx, y2: newMidY + halfDy,
+      };
+    } else {
+      // Cursor hint: grab over midpoints, crosshair elsewhere
+      canvas.style.cursor = nearMidpoint(mx, my) >= 0 ? 'grab' : 'crosshair';
+    }
+    return;
+  }
+
   if (cup.dragging) { cup.x = mx + cup.dragOffX; cup.y = my + cup.dragOffY; }
 
   for (const tie of ties) {
@@ -625,13 +753,24 @@ window.addEventListener('mousemove', e => {
 
 // Drop
 window.addEventListener('mouseup', e => {
+  if (drawMode) {
+    if (activeDraw) {
+      // Only keep lines with meaningful length
+      if (Math.hypot(activeDraw.x2 - activeDraw.x1, activeDraw.y2 - activeDraw.y1) > 4) {
+        drawings.push({ ...activeDraw });
+      }
+      activeDraw = null;
+    }
+    draggedLine = null;
+    return;
+  }
+
   if (cup.dragging) {
     cup.dragging = false;
     cup.resting  = true;
     canvas.style.cursor = 'default';
   }
 
-  const [mx] = canvasMouse(e);
   for (let i = ties.length - 1; i >= 0; i--) {
     const tie = ties[i];
     if (!tie.dragging) continue;
@@ -644,14 +783,6 @@ window.addEventListener('mouseup', e => {
       ties.splice(i, 1); // dropped off string — discard
     }
   }
-});
-
-document.getElementById('clear-ties-btn').addEventListener('click', () => {
-  ties = [];
-});
-
-document.getElementById('sound-cb').addEventListener('change', e => {
-  soundEnabled = e.target.checked;
 });
 
 // ── Init ─────────────────────────────────────────────────────

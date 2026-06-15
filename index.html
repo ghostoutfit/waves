@@ -43,10 +43,16 @@
       <div class="ctrl-group speed-group">
         <div class="ctrl-label-row">
           <span class="ctrl-label">PLAYBACK</span>
-          <button id="theme-btn" class="theme-btn" title="Toggle theme">
-            <span class="theme-box theme-light-box"></span>
-            <span class="theme-box theme-dark-box"></span>
-          </button>
+          <div class="header-icons">
+            <button id="theme-btn" class="theme-btn" title="Toggle theme">
+              <span class="theme-box theme-light-box"></span>
+              <span class="theme-box theme-dark-box"></span>
+            </button>
+            <label class="sound-label" title="Toggle sound">
+              <input type="checkbox" id="sound-cb" checked>
+              <span class="sound-icon">🔊</span>
+            </label>
+          </div>
         </div>
         <div class="speed-row">
           <img class="speed-icon turtle-icon" src="images/Turtle.png" alt="slow">
@@ -64,12 +70,9 @@
         <div class="palette-row">
           <canvas id="cup-palette"  class="palette-slot" width="36" height="46" title="Drag cup onto canvas"></canvas>
           <canvas id="tie-palette"  class="palette-slot" width="24" height="46" title="Drag twist tie onto string"></canvas>
+          <button id="draw-btn" class="draw-toggle" title="Draw measurement line">•–•</button>
         </div>
-        <button id="clear-ties-btn" class="transport-btn" style="margin-top:6px;font-size:12px;padding:3px 8px;letter-spacing:0.05em;">CLEAR TIES</button>
-        <label class="sound-label">
-          <input type="checkbox" id="sound-cb" checked>
-          <span>sound</span>
-        </label>
+        <button id="clear-all-btn" class="clear-all-btn">CLEAR ALL</button>
       </div>
     </div>
   </div>
