@@ -88,7 +88,13 @@ const DRAW_MID_HIT = 12;  // px grab radius for midpoint
 const DRAW_DOT_HIT = 10;  // px grab radius for endpoint dots
 
 const SNAP = GRID_MINOR / 2; // 15 px — half a grid box
-function snap(v) { return Math.round(v / SNAP) * SNAP; }
+// Snap aligned to the actual grid origin, not global 0.
+// Vertical lines start at OFFSET; horizontal lines center on cy.
+function snapX(v) { return Math.round((v - OFFSET) / SNAP) * SNAP + OFFSET; }
+function snapY(v) {
+  const cy = canvas.height / 2 + CY_OFFSET;
+  return Math.round((v - cy) / SNAP) * SNAP + cy;
+}
 
 // ── Audio ─────────────────────────────────────────────────────
 let soundEnabled = true;
@@ -687,7 +693,7 @@ canvas.addEventListener('mousedown', e => {
       draggedLine = { index: hitIdx, offX: m.x - mx, offY: m.y - my };
       e.preventDefault(); return;
     }
-    activeDraw = { x1: snap(mx), y1: snap(my), x2: snap(mx), y2: snap(my) };
+    activeDraw = { x1: snapX(mx), y1: snapY(my), x2: snapX(mx), y2: snapY(my) };
     e.preventDefault(); return;
   }
 
@@ -720,8 +726,11 @@ document.getElementById('cup-palette').addEventListener('mousedown', e => {
   cup.dragging  = true;
   cup.resting   = false;
   cup.vx = cup.vy = 0;
-  cup.x = mx; cup.y = my;
-  cup.dragOffX = cup.dragOffY = 0;
+  // cup.y is the base; offset so cursor is at the rim, keeping the cup body visible
+  cup.x = mx;
+  cup.y = my + CUP_H;
+  cup.dragOffX = 0;
+  cup.dragOffY = CUP_H;
   e.preventDefault();
 });
 
@@ -738,14 +747,14 @@ window.addEventListener('mousemove', e => {
 
   if (drawMode) {
     if (activeDraw) {
-      activeDraw.x2 = snap(mx);
-      activeDraw.y2 = snap(my);
+      activeDraw.x2 = snapX(mx);
+      activeDraw.y2 = snapY(my);
     } else if (draggedEndpoint !== null) {
       const d = drawings[draggedEndpoint.index];
       if (draggedEndpoint.which === 1) {
-        drawings[draggedEndpoint.index] = { ...d, x1: snap(mx), y1: snap(my) };
+        drawings[draggedEndpoint.index] = { ...d, x1: snapX(mx), y1: snapY(my) };
       } else {
-        drawings[draggedEndpoint.index] = { ...d, x2: snap(mx), y2: snap(my) };
+        drawings[draggedEndpoint.index] = { ...d, x2: snapX(mx), y2: snapY(my) };
       }
     } else if (draggedLine !== null) {
       const d = drawings[draggedLine.index];
