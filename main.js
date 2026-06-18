@@ -52,6 +52,14 @@ let prev = null;
 let next = null;
 let particleColors = null;
 
+// ── Slinky (vertical) simulation ─────────────────────────────
+const SLINKY_OFF = 100;   // px from top to first particle
+const SLINKY_SP  = 10;    // px between particles
+let sN = 0;
+let sCur = null, sPrev = null, sNext = null;
+let sPhase = 0;
+let sAmp   = AMP_VALUES[0]; // tracks targetAmplitude with smooth lag
+
 // ── Cup ──────────────────────────────────────────────────────
 const CUP_TW      = 14;   // half top-width (px)
 const CUP_BW      = 9;    // half bottom-width (px)
@@ -409,17 +417,25 @@ function resize() {
   canvas.height = canvas.offsetHeight;
 
   const newN = Math.floor((canvas.width - OFFSET) / SPACING) + 1;
-  if (newN === N) return;
-  N = newN;
+  if (newN !== N) {
+    N = newN;
+    cur  = new Float32Array(N);
+    prev = new Float32Array(N);
+    next = new Float32Array(N);
+    particleColors = Array.from({ length: N }, (_, i) => particleColor(i));
+    if (cup.resting && !cup.dragging && !cup.inPalette) {
+      cup.x = canvas.width - 80;
+      cup.y = canvas.height / 2 + CY_OFFSET;
+    }
+  }
 
-  cur  = new Float32Array(N);
-  prev = new Float32Array(N);
-  next = new Float32Array(N);
-  particleColors = Array.from({ length: N }, (_, i) => particleColor(i));
-
-  if (cup.resting && !cup.dragging && !cup.inPalette) {
-    cup.x = canvas.width - 80;
-    cup.y = canvas.height / 2 + CY_OFFSET;
+  // Slinky sim: particle count set by canvas height
+  const newSN = Math.floor((canvas.height - SLINKY_OFF) / SLINKY_SP) + 1;
+  if (newSN !== sN) {
+    sN   = newSN;
+    sCur  = new Float32Array(sN);
+    sPrev = new Float32Array(sN);
+    sNext = new Float32Array(sN);
   }
 }
 
@@ -482,6 +498,23 @@ function step() {
   next = tmp;
 }
 
+// ── Slinky step ──────────────────────────────────────────────
+function slinkyStep() {
+  if (!sCur) return;
+  for (let i = 1; i < sN - 1; i++) {
+    sNext[i] = 2 * sCur[i] - sPrev[i]
+             + CFL2 * (sCur[i + 1] - 2 * sCur[i] + sCur[i - 1]);
+  }
+  sAmp += (targetAmplitude - sAmp) * 0.05;
+  sPhase += 2 * Math.PI * frequency * DT;
+  sNext[0] = sAmp * Math.sin(sPhase);
+  sNext[sN - 1] = sCur[sN - 2] + MUR * (sNext[sN - 2] - sCur[sN - 1]);
+  for (let i = 1; i < sN - 1; i++) {
+    if (Math.abs(sNext[i]) < 0.15 && Math.abs(sCur[i]) < 0.15) sNext[i] = 0;
+  }
+  const t = sPrev; sPrev = sCur; sCur = sNext; sNext = t;
+}
+
 // ── Grid ─────────────────────────────────────────────────────
 function drawGrid() {
   const W = canvas.width, H = canvas.height, cy = H / 2 + CY_OFFSET;
@@ -522,34 +555,67 @@ function drawGrid() {
 }
 
 // ── Slinky view ──────────────────────────────────────────────
-// Top-down view of a coiled spring: wave displacement + coil sinusoid.
-// COIL_PITCH px per full turn; COIL_R = lateral radius of each coil.
-const COIL_PITCH = 60;   // px — one coil turn
-const COIL_R     = 20;   // px — coil radius (lateral amplitude)
+// Top-down view of a vertical slinky driven by a plate sliding L-R.
+// The plate displacement drives a 1-D wave that propagates downward.
+// Coil offset added so the wire traces the characteristic diagonal pattern.
+const COIL_PITCH = 60;   // px — one coil turn (vertical)
+const COIL_R     = 20;   // px — coil radius (L-R extent per turn)
+
+// Plate-on-rail visual constants
+const RAIL_H      = 14;  // px from canvas top to the horizontal rail
+const PLATE_W     = 48;  // half-width of the sliding plate
+const PLATE_H     = 10;  // height of plate rectangle
 
 let activeView = 'wave';
 
 function drawSlinky(alpha) {
+  if (!sCur) return;
   const W  = canvas.width;
   const H  = canvas.height;
-  const cy = H / 2 + CY_OFFSET;
+  const cx = W / 2;
 
   ctx.clearRect(0, 0, W, H);
   ctx.fillStyle = darkMode ? '#111' : '#f7f6f0';
   ctx.fillRect(0, 0, W, H);
-  drawGrid();
 
+  const fg   = darkMode ? 'rgba(255,255,255,0.18)' : 'rgba(0,0,0,0.15)';
+  const fg2  = darkMode ? 'rgba(255,255,255,0.45)' : 'rgba(0,0,0,0.40)';
+
+  // ── Horizontal rail ──────────────────────────────────────
+  ctx.strokeStyle = fg2;
+  ctx.lineWidth   = 2;
   ctx.beginPath();
-  for (let i = 0; i < N; i++) {
-    const x    = OFFSET + i * SPACING;
-    const disp = prev[i] + (cur[i] - prev[i]) * alpha;
-    const coil = COIL_R * Math.sin((x / COIL_PITCH) * Math.PI * 2);
-    const y    = cy + disp + coil;
+  ctx.moveTo(cx - PLATE_W * 3, RAIL_H);
+  ctx.lineTo(cx + PLATE_W * 3, RAIL_H);
+  ctx.stroke();
+
+  // ── Sliding plate ─────────────────────────────────────────
+  const plateDisp = sPrev[0] + (sCur[0] - sPrev[0]) * alpha;
+  const plateX    = cx + plateDisp;
+
+  ctx.fillStyle   = fg2;
+  ctx.fillRect(plateX - PLATE_W, RAIL_H - PLATE_H / 2, PLATE_W * 2, PLATE_H);
+
+  // Vertical connector from plate down to first slinky particle
+  ctx.strokeStyle = fg;
+  ctx.lineWidth   = 2;
+  ctx.beginPath();
+  ctx.moveTo(plateX, RAIL_H + PLATE_H / 2);
+  ctx.lineTo(plateX, SLINKY_OFF);
+  ctx.stroke();
+
+  // ── Slinky wire ───────────────────────────────────────────
+  ctx.beginPath();
+  for (let i = 0; i < sN; i++) {
+    const y    = SLINKY_OFF + i * SLINKY_SP;
+    const disp = sPrev[i] + (sCur[i] - sPrev[i]) * alpha;
+    const coil = COIL_R * Math.sin((y / COIL_PITCH) * Math.PI * 2);
+    const x    = cx + disp + coil;
     if (i === 0) ctx.moveTo(x, y);
     else         ctx.lineTo(x, y);
   }
 
-  const hue = (Date.now() / 150) % 360;   // full rainbow every ~54 s
+  const hue = (Date.now() / 150) % 360;
   const lit  = darkMode ? 65 : 50;
   ctx.strokeStyle = `hsl(${hue},90%,${lit}%)`;
   ctx.lineWidth   = 4;
@@ -614,6 +680,7 @@ function loop() {
     simAccum += speedFactor;
     while (simAccum >= 1) {
       step();
+      slinkyStep();
       simAccum -= 1;
     }
   }
