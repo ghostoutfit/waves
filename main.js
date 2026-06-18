@@ -521,9 +521,46 @@ function drawGrid() {
   ctx.restore();
 }
 
+// ── Slinky view ──────────────────────────────────────────────
+// Top-down view of a coiled spring: wave displacement + coil sinusoid.
+// COIL_PITCH px per full turn; COIL_R = lateral radius of each coil.
+const COIL_PITCH = 60;   // px — one coil turn
+const COIL_R     = 20;   // px — coil radius (lateral amplitude)
+
+let activeView = 'wave';
+
+function drawSlinky(alpha) {
+  const W  = canvas.width;
+  const H  = canvas.height;
+  const cy = H / 2 + CY_OFFSET;
+
+  ctx.clearRect(0, 0, W, H);
+  ctx.fillStyle = darkMode ? '#111' : '#f7f6f0';
+  ctx.fillRect(0, 0, W, H);
+  drawGrid();
+
+  ctx.beginPath();
+  for (let i = 0; i < N; i++) {
+    const x    = OFFSET + i * SPACING;
+    const disp = prev[i] + (cur[i] - prev[i]) * alpha;
+    const coil = COIL_R * Math.sin((x / COIL_PITCH) * Math.PI * 2);
+    const y    = cy + disp + coil;
+    if (i === 0) ctx.moveTo(x, y);
+    else         ctx.lineTo(x, y);
+  }
+
+  const hue = (Date.now() / 150) % 360;   // full rainbow every ~54 s
+  const lit  = darkMode ? 65 : 50;
+  ctx.strokeStyle = `hsl(${hue},90%,${lit}%)`;
+  ctx.lineWidth   = 4;
+  ctx.lineCap     = 'round';
+  ctx.lineJoin    = 'round';
+  ctx.stroke();
+}
+
 // ── Draw ─────────────────────────────────────────────────────
 // alpha: fraction through current step interval (0–1) for interpolation
-function draw(alpha) {
+function drawWave(alpha) {
   const W  = canvas.width;
   const H  = canvas.height;
   const cy = H / 2 + CY_OFFSET;
@@ -564,6 +601,11 @@ function draw(alpha) {
   if (!cup.inPalette) drawCup();
   drawDrawings();
   drawPaletteItems();
+}
+
+function draw(alpha) {
+  if (activeView === 'slinky') drawSlinky(alpha);
+  else                         drawWave(alpha);
 }
 
 // ── Loop ─────────────────────────────────────────────────────
@@ -646,6 +688,14 @@ document.getElementById('theme-btn').addEventListener('click', () => {
 // Sound toggle
 document.getElementById('sound-cb').addEventListener('change', e => {
   soundEnabled = e.target.checked;
+});
+
+// View tabs
+document.querySelectorAll('.view-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    activeView = btn.dataset.view;
+    document.querySelectorAll('.view-btn').forEach(b => b.classList.toggle('active', b === btn));
+  });
 });
 
 // Draw mode toggle
