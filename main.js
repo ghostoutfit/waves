@@ -3,8 +3,8 @@ const canvas = document.getElementById('canvas');
 const ctx    = canvas.getContext('2d');
 
 // Slider options
-const AMP_VALUES  = [0, 30, 60, 120];      // px (0 = off) — 1/2/4 grid boxes
-const AMP_LABELS  = ['0', '1', '2', '4'];
+const AMP_VALUES  = [22, 45, 90];           // px — 1/2/4 grid boxes (no 0; ON/OFF handles that)
+const AMP_LABELS  = ['1', '2', '4'];
 const FREQ_VALUES = [0.25, 0.5, 1.0, 2.0]; // Hz
 const FREQ_LABELS = [
   '<span class="frac"><span class="num">1</span><span class="den">4</span></span>',
@@ -13,12 +13,18 @@ const FREQ_LABELS = [
   '2',
 ];
 
-let amplitude       = AMP_VALUES[0];
-let targetAmplitude = AMP_VALUES[0];
-let frequency       = FREQ_VALUES[0];
+let selectedAmpValue = AMP_VALUES[0]; // currently-chosen amplitude (22 px)
+let driverOn         = false;         // whether continuous driver is running
+let amplitude        = 0;            // smoothed amplitude (tracks targetAmplitude)
+let targetAmplitude  = 0;            // 0 when driver off, selectedAmpValue when on
+let frequency        = FREQ_VALUES[0];
 
 // Phase accumulator — keeps driver position continuous across freq/amp changes
 let phase = 0;
+
+// Pulse: one half-cycle fired on demand; -1 = inactive
+let pulsePhase  = -1;
+let sPulsePhase = -1;
 
 // Slow-mo: speedFactor 0.25 (turtle) → 1.0 (rabbit) steps per display frame
 // Interpolation between prev and cur keeps rendering smooth below 1 step/frame
@@ -53,18 +59,18 @@ let next = null;
 let particleColors = null;
 
 // ── Slinky (vertical) simulation ─────────────────────────────
-const SLINKY_OFF = 100;   // px from top to first particle
-const SLINKY_SP  = 10;    // px between particles
+const SLINKY_OFF = 80;    // px — left margin, equilibrium x of first particle
+const SLINKY_SP  = 8;     // px — horizontal equilibrium spacing between particles
 let sN = 0;
 let sCur = null, sPrev = null, sNext = null;
 let sPhase = 0;
 let sAmp   = AMP_VALUES[0]; // tracks targetAmplitude with smooth lag
 
-// ── Cup ──────────────────────────────────────────────────────
-const CUP_TW      = 14;   // half top-width (px)
-const CUP_BW      = 9;    // half bottom-width (px)
-const CUP_H       = 34;   // height (px)
-const CUP_FRICTION = 0.9675; // velocity multiplier per frame (floor friction)
+// ── Cup (string mode) ────────────────────────────────────────
+const CUP_TW      = 14;
+const CUP_BW      = 9;
+const CUP_H       = 34;
+const CUP_FRICTION = 0.9675;
 
 let cup = {
   x: 0, y: 0,
@@ -75,16 +81,40 @@ let cup = {
   dragOffX: 0, dragOffY: 0,
 };
 
-// ── Twist ties ────────────────────────────────────────────────
-const TIE_W = 5;   // half-width (px)
-const TIE_H = 18;  // half-height (px)
+// ── Toy (slinky mode) — bone sprite, bounces between coils ──
+const TOY_HW = 14;  // half-width for collision (px)
+const TOY_HH = 7;   // shaft half-height for collision (px)
+const TOY_KR = 11;  // knob radius for hit-test (px)
+const TOY_FRICTION = 0.965;
 
-let ties = []; // { x, y, particleIndex (-1=unattached), dragging, dragOffX, dragOffY }
+// Bone sprite — loaded once, drawn rotated 90° so it sits horizontally
+const boneImg = new Image();
+boneImg.src = 'images/Bone.png';
+
+let toy = {
+  x: 0, vx: 0,
+  inPalette: true,
+  dragging: false,
+  dragOffX: 0,
+  iL: -1, iR: -1,  // flanking particle indices, fixed at drop time
+};
+
+
+// ── Twist ties ────────────────────────────────────────────────
+const TIE_W = 10;  // half-width (px)
+const TIE_H = 36;  // half-height (px)
+
+// Ties — per view. Slinky ties track slinkyParticleIndex + xEq for coil following.
+const stringTies = [];  // { x, y, particleIndex, dragging, dragOffX, dragOffY }
+const slinkyTies = [];  // { x, y, slinkyParticleIndex, xEq, dragging, dragOffX, dragOffY }
+function curTies() { return activeView === 'slinky' ? slinkyTies : stringTies; }
 let paletteCupCtx = null;
 let paletteTieCtx = null;
 
-// ── Drawings ──────────────────────────────────────────────────
-let drawings        = [];    // [{ x1, y1, x2, y2 }]
+// ── Drawings — per view ───────────────────────────────────────
+const drawingsByView = { wave: [], slinky: [] };
+function curDrawings() { return drawingsByView[activeView]; }
+
 let drawMode        = false;
 let activeDraw      = null;  // { x1, y1, x2, y2 } — line being drawn
 let draggedLine     = null;  // { index, offX, offY } — line being moved by midpoint
@@ -100,7 +130,13 @@ const SNAP = GRID_MINOR / 2; // 15 px — half a grid box
 // Vertical lines start at OFFSET; horizontal lines center on cy.
 function snapX(v) { return Math.round((v - OFFSET) / SNAP) * SNAP + OFFSET; }
 function snapY(v) {
-  const cy = canvas.height / 2 + CY_OFFSET;
+  let cy;
+  if (activeView === 'slinky') {
+    const cb = document.getElementById('controls').getBoundingClientRect().bottom;
+    cy = (cb + canvas.height) / 2;
+  } else {
+    cy = canvas.height / 2 + CY_OFFSET;
+  }
   return Math.round((v - cy) / SNAP) * SNAP + cy;
 }
 
@@ -113,34 +149,34 @@ function getAudioCtx() {
   return audioCtx;
 }
 
-function playSmack(intensity) {
-  // intensity: avg particle velocity magnitude at impact (px/step), typically 1–15
+function playSqueak(intensity) {
+  // intensity: wave velocity magnitude at impact (px/step), typically 1–15
   if (!soundEnabled) return;
-  const ac = getAudioCtx();
+  const ac  = getAudioCtx();
+  const vol = Math.min(1.0, intensity / 8);
 
-  const duration = 0.09; // seconds
-  const bufLen   = Math.ceil(ac.sampleRate * duration);
-  const buffer   = ac.createBuffer(1, bufLen, ac.sampleRate);
-  const data     = buffer.getChannelData(0);
-  for (let i = 0; i < bufLen; i++) data[i] = Math.random() * 2 - 1;
+  // Two oscillators: fundamental + harmonic, both sweep up then down (squeak shape)
+  const dur   = 0.12 + vol * 0.08;
+  const fBase = 700 + 900 * vol;
 
-  const source = ac.createBufferSource();
-  source.buffer = buffer;
+  function makeChirp(freq, gain) {
+    const osc = ac.createOscillator();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(freq * 0.7, ac.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(freq * 1.35, ac.currentTime + dur * 0.35);
+    osc.frequency.exponentialRampToValueAtTime(freq * 0.5,  ac.currentTime + dur);
 
-  const filter = ac.createBiquadFilter();
-  filter.type            = 'bandpass';
-  filter.frequency.value = 900;
-  filter.Q.value         = 0.6;
+    const g = ac.createGain();
+    g.gain.setValueAtTime(gain, ac.currentTime);
+    g.gain.setValueAtTime(gain, ac.currentTime + dur * 0.15);
+    g.gain.exponentialRampToValueAtTime(0.001, ac.currentTime + dur);
 
-  const gain = ac.createGain();
-  const vol  = Math.min(1.0, intensity / 10); // 10 px/step → full volume
-  gain.gain.setValueAtTime(vol, ac.currentTime);
-  gain.gain.exponentialRampToValueAtTime(0.001, ac.currentTime + duration);
+    osc.connect(g); g.connect(ac.destination);
+    osc.start(); osc.stop(ac.currentTime + dur);
+  }
 
-  source.connect(filter);
-  filter.connect(gain);
-  gain.connect(ac.destination);
-  source.start();
+  makeChirp(fBase,        vol * 0.45);
+  makeChirp(fBase * 1.85, vol * 0.18); // harmonic
 }
 
 // ── Colour ───────────────────────────────────────────────────
@@ -168,85 +204,78 @@ function updateCup() {
     cup.resting = true;
   }
 
-  const offScreen = cup.x < -CUP_TW || cup.x > canvas.width + CUP_TW
-                 || cup.y < -CUP_H  || cup.y > canvas.height + CUP_H;
-
-  const cr = document.getElementById('controls').getBoundingClientRect();
-  const canvasR = canvas.getBoundingClientRect();
-  const cx1 = (cr.left   - canvasR.left) * (canvas.width  / canvasR.width);
-  const cy1 = (cr.top    - canvasR.top)  * (canvas.height / canvasR.height);
-  const cx2 = cx1 + cr.width  * (canvas.width  / canvasR.width);
-  const cy2 = cy1 + cr.height * (canvas.height / canvasR.height);
-  const underToolbar = cup.x + CUP_TW > cx1 && cup.x - CUP_TW < cx2
-                    && cup.y          > cy1 && cup.y - CUP_H   < cy2;
-
-  if (offScreen || underToolbar) {
+  if (cup.x < -CUP_TW - 4 || cup.x > canvas.width + CUP_TW + 4
+   || cup.y < -CUP_H - 4  || cup.y > canvas.height + 4) {
     cup.inPalette = true;
     cup.vx = cup.vy = 0;
     cup.resting = true;
   }
 }
 
-function drawCup() {
-  const { x, y } = cup;
-  const EY = 0.28; // ellipse y-scale — controls how "top-down" it looks
-  ctx.save();
-  ctx.translate(x, y);
-
+function drawCup(c, x, y, s) {
+  // c = context, s = uniform scale factor (1 for canvas, ~0.65 for palette)
+  s = s || 1;
+  const tw = CUP_TW * s, bw = CUP_BW * s, h = CUP_H * s;
+  const EY = 0.28;
   const bodyFill     = darkMode ? 'rgba(210,225,240,0.92)' : 'rgba(235,245,255,0.97)';
   const sideStroke   = darkMode ? '#889' : '#99a';
   const interiorFill = darkMode ? 'rgba(15,25,40,0.82)'    : 'rgba(185,205,228,0.80)';
   const rimStroke    = darkMode ? '#aab' : '#88a';
 
-  // Body (trapezoid between the two ellipses)
-  ctx.beginPath();
-  ctx.moveTo(-CUP_TW, -CUP_H);
-  ctx.lineTo( CUP_TW, -CUP_H);
-  ctx.lineTo( CUP_BW,  0);
-  ctx.lineTo(-CUP_BW,  0);
-  ctx.closePath();
-  ctx.fillStyle = bodyFill;
-  ctx.fill();
+  c.save();
+  c.translate(x, y);
 
-  // Side strokes only (no top/bottom edge lines — ellipses handle those)
-  ctx.beginPath();
-  ctx.moveTo(-CUP_TW, -CUP_H);
-  ctx.lineTo(-CUP_BW,  0);
-  ctx.moveTo( CUP_TW, -CUP_H);
-  ctx.lineTo( CUP_BW,  0);
-  ctx.strokeStyle = sideStroke;
-  ctx.lineWidth   = 1.5;
-  ctx.stroke();
+  c.beginPath();
+  c.moveTo(-tw, -h); c.lineTo(tw, -h); c.lineTo(bw, 0); c.lineTo(-bw, 0);
+  c.closePath();
+  c.fillStyle = bodyFill; c.fill();
 
-  // Bottom ellipse
-  ctx.beginPath();
-  ctx.ellipse(0, 0, CUP_BW, CUP_BW * EY, 0, 0, Math.PI * 2);
-  ctx.fillStyle   = darkMode ? 'rgba(170,195,222,0.9)' : 'rgba(215,230,245,0.9)';
-  ctx.fill();
-  ctx.strokeStyle = sideStroke;
-  ctx.lineWidth   = 1;
-  ctx.stroke();
+  c.beginPath();
+  c.moveTo(-tw, -h); c.lineTo(-bw, 0);
+  c.moveTo( tw, -h); c.lineTo( bw, 0);
+  c.strokeStyle = sideStroke; c.lineWidth = 1.5 * s; c.stroke();
 
-  // Top opening interior
-  ctx.beginPath();
-  ctx.ellipse(0, -CUP_H, CUP_TW, CUP_TW * EY, 0, 0, Math.PI * 2);
-  ctx.fillStyle = interiorFill;
-  ctx.fill();
+  c.beginPath();
+  c.ellipse(0, 0, bw, Math.max(1, bw * EY), 0, 0, Math.PI * 2);
+  c.fillStyle = darkMode ? 'rgba(170,195,222,0.9)' : 'rgba(215,230,245,0.9)';
+  c.fill(); c.strokeStyle = sideStroke; c.lineWidth = s; c.stroke();
 
-  // Rim
-  ctx.beginPath();
-  ctx.ellipse(0, -CUP_H, CUP_TW + 1.5, (CUP_TW + 1.5) * EY, 0, 0, Math.PI * 2);
-  ctx.strokeStyle = rimStroke;
-  ctx.lineWidth   = 2.5;
-  ctx.stroke();
+  c.beginPath();
+  c.ellipse(0, -h, tw, Math.max(1, tw * EY), 0, 0, Math.PI * 2);
+  c.fillStyle = interiorFill; c.fill();
 
-  ctx.restore();
+  c.beginPath();
+  c.ellipse(0, -h, tw + 1.5 * s, Math.max(1, (tw + 1.5 * s) * EY), 0, 0, Math.PI * 2);
+  c.strokeStyle = rimStroke; c.lineWidth = 2.5 * s; c.stroke();
+
+  c.restore();
+}
+
+function cupHitTest(mx, my) {
+  const dx = mx - cup.x, dy = my - cup.y;
+  return dx > -(CUP_TW + 6) && dx < (CUP_TW + 6) && dy > -(CUP_H + 6) && dy < 6;
+}
+
+function drawToy(c, x, y, scale) {
+  if (!boneImg.complete || !boneImg.naturalWidth) return;
+  const s  = scale || 1;
+  // Bone image is tall/portrait (241×500) — draw upright, preserve aspect ratio.
+  // Display size: 30×62 px at scale=1.
+  const dw = 30 * s, dh = 62 * s;
+  c.save();
+  c.translate(x, y);
+  c.drawImage(boneImg, -dw / 2, -dh / 2, dw, dh);
+  c.restore();
+}
+
+function toyHitTest(mx, my, slinkyCy) {
+  return Math.abs(mx - toy.x) < TOY_HW + 8 && Math.abs(my - slinkyCy) < TOY_KR + 8;
 }
 
 function drawTieAt(c, x, y) {
   const arm    = TIE_H;
   const hw     = TIE_W;
-  const spread = 0.38;
+  const spread = 0.29;
   const fill   = darkMode ? '#2d9962' : '#40c07a';
   const mid    = darkMode ? '#1a5535' : '#257840'; // darker centre line
   const knot   = darkMode ? '#144428' : '#1b5c30';
@@ -284,15 +313,27 @@ function drawTieAt(c, x, y) {
   c.restore();
 }
 
+
+// Draws slinky ties using precomputed verts so position exactly matches the wire.
+function drawSlinkyTies(verts, step) {
+  for (const tie of slinkyTies) {
+    if (tie.dragging) { drawTieAt(ctx, tie.x, tie.y); continue; }
+    if (tie.slinkyParticleIndex < 0) continue;
+    const idx = Math.max(0, Math.min(verts.length - 1,
+      Math.round((tie.xEq - SLINKY_OFF) / step)));
+    const v = verts[idx];
+    drawTieAt(ctx, v.x, v.y);
+  }
+}
+
 function drawTies(alpha) {
+  // Slinky ties are drawn inside drawSlinky after verts are computed.
+  if (activeView === 'slinky') return;
   const cy = canvas.height / 2 + CY_OFFSET;
-  for (const tie of ties) {
-    let y;
-    if (tie.dragging) {
-      y = tie.y;
-    } else {
-      const i = tie.particleIndex;
-      y = cy + prev[i] + (cur[i] - prev[i]) * alpha;
+  for (const tie of stringTies) {
+    let y = tie.y;
+    if (!tie.dragging && tie.particleIndex >= 0) {
+      y = cy + prev[tie.particleIndex] + (cur[tie.particleIndex] - prev[tie.particleIndex]) * alpha;
     }
     drawTieAt(ctx, tie.x, y);
   }
@@ -301,44 +342,25 @@ function drawTies(alpha) {
 function drawPaletteItems() {
   if (!paletteCupCtx || !paletteTieCtx) return;
 
-  // Cup palette
+  // Toy palette — draw toy at palette-canvas centre
   const pc = paletteCupCtx;
   const pw = pc.canvas.width, ph = pc.canvas.height;
   pc.clearRect(0, 0, pw, ph);
-  pc.globalAlpha = cup.inPalette ? 1 : 0.2;
-  const s = 0.65, EY = 0.28;
-  const tw = CUP_TW * s, bw = CUP_BW * s, h = CUP_H * s;
-  pc.save();
-  pc.translate(pw / 2, ph - 8);
-  pc.beginPath();
-  pc.moveTo(-tw,-h); pc.lineTo(tw,-h); pc.lineTo(bw,0); pc.lineTo(-bw,0);
-  pc.closePath();
-  pc.fillStyle = darkMode ? 'rgba(210,225,240,0.92)' : 'rgba(235,245,255,0.97)';
-  pc.fill();
-  pc.beginPath();
-  pc.moveTo(-tw,-h); pc.lineTo(-bw,0);
-  pc.moveTo( tw,-h); pc.lineTo( bw,0);
-  pc.strokeStyle = darkMode ? '#889' : '#99a'; pc.lineWidth = 1.5; pc.stroke();
-  pc.beginPath(); pc.ellipse(0,0,bw,Math.max(1,bw*EY),0,0,Math.PI*2);
-  pc.fillStyle = darkMode ? 'rgba(170,195,222,0.9)' : 'rgba(215,230,245,0.9)';
-  pc.fill(); pc.strokeStyle = darkMode ? '#889' : '#99a'; pc.lineWidth = 1; pc.stroke();
-  pc.beginPath(); pc.ellipse(0,-h,tw,Math.max(1,tw*EY),0,0,Math.PI*2);
-  pc.fillStyle = darkMode ? 'rgba(15,25,40,0.82)' : 'rgba(185,205,228,0.80)'; pc.fill();
-  pc.beginPath(); pc.ellipse(0,-h,tw+1,Math.max(1,(tw+1)*EY),0,0,Math.PI*2);
-  pc.strokeStyle = darkMode ? '#aab' : '#88a'; pc.lineWidth = 2; pc.stroke();
-  pc.restore();
+  if (activeView === 'slinky') {
+    pc.globalAlpha = toy.inPalette ? 1 : 0.25;
+    drawToy(pc, pw / 2, ph / 2, 0.765);
+  } else {
+    pc.globalAlpha = cup.inPalette ? 1 : 0.2;
+    drawCup(pc, pw / 2, ph - 8, 0.65);
+  }
   pc.globalAlpha = 1;
 
   // Tie palette
   const tc = paletteTieCtx;
   tc.clearRect(0, 0, tc.canvas.width, tc.canvas.height);
-  drawTieAt(tc, tc.canvas.width / 2, tc.canvas.height / 2);
+  drawTieAt(tc, tc.canvas.width / 2, tc.canvas.height / 2 + 17);
 }
 
-function cupHitTest(mx, my) {
-  const dx = mx - cup.x, dy = my - cup.y;
-  return dx > -(CUP_TW + 6) && dx < (CUP_TW + 6) && dy > -(CUP_H + 6) && dy < 6;
-}
 
 // ── Drawing tool ──────────────────────────────────────────────
 function drawDrawings() {
@@ -351,6 +373,7 @@ function drawDrawings() {
   ctx.lineWidth   = 2;
   ctx.lineCap     = 'round';
 
+  const drawings = curDrawings();
   const allLines = activeDraw ? [...drawings, activeDraw] : drawings;
 
   for (let i = 0; i < allLines.length; i++) {
@@ -394,6 +417,7 @@ function lineMidpoint(d) {
 }
 
 function nearMidpoint(mx, my) {
+  const drawings = curDrawings();
   for (let i = 0; i < drawings.length; i++) {
     const m = lineMidpoint(drawings[i]);
     if (Math.hypot(mx - m.x, my - m.y) < DRAW_MID_HIT) return i;
@@ -403,6 +427,7 @@ function nearMidpoint(mx, my) {
 
 // Returns { index, which: 1|2 } for the nearest endpoint, or null
 function nearEndpoint(mx, my) {
+  const drawings = curDrawings();
   for (let i = 0; i < drawings.length; i++) {
     const d = drawings[i];
     if (Math.hypot(mx - d.x1, my - d.y1) < DRAW_DOT_HIT) return { index: i, which: 1 };
@@ -429,8 +454,8 @@ function resize() {
     }
   }
 
-  // Slinky sim: particle count set by canvas height
-  const newSN = Math.floor((canvas.height - SLINKY_OFF) / SLINKY_SP) + 1;
+  // Slinky sim: fixed 50 grid squares long (50 × GRID_MINOR = 1500 px), extending off-screen if needed
+  const newSN = Math.max(4, Math.floor(50 * GRID_MINOR / SLINKY_SP) + 2);
   if (newSN !== sN) {
     sN   = newSN;
     sCur  = new Float32Array(sN);
@@ -446,33 +471,36 @@ function step() {
             + CFL2 * (cur[i + 1] - 2 * cur[i] + cur[i - 1]);
   }
 
-  // Smoothly track target amplitude to avoid shock discontinuities
   amplitude += (targetAmplitude - amplitude) * 0.05;
-
   phase += 2 * Math.PI * frequency * DT;
-  next[0] = amplitude * Math.sin(phase);
+
+  if (pulsePhase >= 0) {
+    next[0]    = selectedAmpValue * Math.sin(pulsePhase);
+    pulsePhase += 2 * Math.PI * frequency * DT;
+    if (pulsePhase >= Math.PI) { next[0] = 0; pulsePhase = -1; }
+  } else {
+    next[0] = amplitude * Math.sin(phase);
+  }
 
   next[N - 1] = cur[N - 2] + MUR * (next[N - 2] - cur[N - 1]);
 
-  // ── Cup collision ─────────────────────────────────────────
-  // Cup occupies y-band [upperEdge, lowerEdge] in displacement coords.
-  // Any particle entering that band is reflected; its velocity becomes the cup's.
-  if (!cup.dragging) {
-    const cy         = canvas.height / 2 + CY_OFFSET;
-    const lowerEdge  = cup.y - cy;           // cup base (larger y on screen)
-    const upperEdge  = cup.y - CUP_H - cy;  // cup rim  (smaller y on screen)
+  // ── Toy collision (string mode) ───────────────────────────
+  // Cup occupies the y-band [upperEdge, lowerEdge] in displacement coords.
+  // Any particle whose y-displacement enters the circle triggers a bounce.
+  if (activeView === 'wave' && !cup.inPalette && !cup.dragging) {
+    const cy        = canvas.height / 2 + CY_OFFSET;
+    const lowerEdge = cup.y - cy;        // cup base in displacement coords
+    const upperEdge = cup.y - CUP_H - cy; // cup rim
     const iLeft  = Math.max(1, Math.floor((cup.x - CUP_TW - OFFSET) / SPACING));
     const iRight = Math.min(N - 2, Math.ceil((cup.x + CUP_TW - OFFSET) / SPACING));
 
     let velSum = 0, hits = 0;
 
     for (let i = iLeft; i <= iRight; i++) {
-      const outside = cur[i] < upperEdge || cur[i] > lowerEdge;
+      const outside = cur[i]  < upperEdge || cur[i]  > lowerEdge;
       const enters  = next[i] >= upperEdge && next[i] <= lowerEdge;
-
       if (outside && enters) {
-        const vel = next[i] - cur[i]; // px/step; sign = direction of motion
-        velSum += vel;
+        velSum += next[i] - cur[i];
         hits++;
       }
     }
@@ -482,7 +510,6 @@ function step() {
       cup.vy      = avgVel;
       cup.vx      = Math.abs(cup.vy) * 0.3;
       cup.resting = false;
-      playSmack(Math.abs(avgVel));
     }
   }
 
@@ -503,21 +530,50 @@ function slinkyStep() {
   if (!sCur) return;
   for (let i = 1; i < sN - 1; i++) {
     sNext[i] = 2 * sCur[i] - sPrev[i]
-             + CFL2 * (sCur[i + 1] - 2 * sCur[i] + sCur[i - 1]);
+             + SLINKY_CFL2 * (sCur[i + 1] - 2 * sCur[i] + sCur[i - 1]);
   }
   sAmp += (targetAmplitude - sAmp) * 0.05;
   sPhase += 2 * Math.PI * frequency * DT;
-  sNext[0] = sAmp * Math.sin(sPhase);
-  sNext[sN - 1] = sCur[sN - 2] + MUR * (sNext[sN - 2] - sCur[sN - 1]);
+
+  if (sPulsePhase >= 0) {
+    sNext[0]    = selectedAmpValue * Math.sin(sPulsePhase);
+    sPulsePhase += 2 * Math.PI * frequency * DT;
+    if (sPulsePhase >= Math.PI) { sNext[0] = 0; sPulsePhase = -1; }
+  } else {
+    sNext[0] = sAmp * Math.sin(sPhase);
+  }
+  sNext[sN - 1] = sCur[sN - 2] + SLINKY_MUR * (sNext[sN - 2] - sCur[sN - 1]);
   for (let i = 1; i < sN - 1; i++) {
     if (Math.abs(sNext[i]) < 0.15 && Math.abs(sCur[i]) < 0.15) sNext[i] = 0;
   }
+
+  // ── Toy motion (slinky mode) ────────────────────────────────
+  // Bone is locked between particles iL and iR (set at drop time).
+  // Each step it moves by exactly the average VELOCITY of those two particles —
+  // tracking how much they moved, not where they are absolutely.
+  // This avoids jumps from initial displacement and oscillation runaway.
+  if (activeView === 'slinky' && !toy.inPalette && !toy.dragging && toy.iL >= 1 && toy.iR >= 1) {
+    const velL = sNext[toy.iL] - sCur[toy.iL];
+    const velR = sNext[toy.iR] - sCur[toy.iR];
+
+    toy.x += (velL + velR) / 2;
+
+    if (velL > 0 && velR < 0) {
+      playSqueak((velL - velR) / 2);
+    }
+
+    const minX = SLINKY_OFF + 4;
+    if (toy.x < minX) { toy.x = minX; }
+    if (toy.x > canvas.width + 60) { toy.inPalette = true; toy.iL = toy.iR = -1; }
+  }
+
   const t = sPrev; sPrev = sCur; sCur = sNext; sNext = t;
 }
 
 // ── Grid ─────────────────────────────────────────────────────
-function drawGrid() {
-  const W = canvas.width, H = canvas.height, cy = H / 2 + CY_OFFSET;
+function drawGrid(cy) {
+  const W = canvas.width, H = canvas.height;
+  if (cy === undefined) cy = H / 2 + CY_OFFSET;
   ctx.save();
 
   // Minor lines (every GRID_MINOR = 30 px) — skip positions that fall on major lines
@@ -555,73 +611,150 @@ function drawGrid() {
 }
 
 // ── Slinky view ──────────────────────────────────────────────
-// Top-down view of a vertical slinky driven by a plate sliding L-R.
-// The plate displacement drives a 1-D wave that propagates downward.
-// Coil offset added so the wire traces the characteristic diagonal pattern.
-const COIL_PITCH = 60;   // px — one coil turn (vertical)
-const COIL_R     = 20;   // px — coil radius (L-R extent per turn)
+// Side view of a horizontal slinky driven by a vertical pusher plate on the left.
+// Longitudinal wave: pusher oscillates left-right (parallel to slinky axis),
+// creating compression/rarefaction that propagates to the right.
+// Each particle's x-displacement is longitudinal; coil loops drawn in y
+// so that bunching/spreading of loops reveals the compression wave.
+const COIL_PITCH  = 60;  // px — one coil turn (equilibrium horizontal space)
+const COIL_R      = 132; // px — coil half-height (vertical extent per turn)
 
-// Plate-on-rail visual constants
-const RAIL_H      = 14;  // px from canvas top to the horizontal rail
-const PLATE_W     = 48;  // half-width of the sliding plate
-const PLATE_H     = 10;  // height of plate rectangle
+// Pusher-on-rail visual constants
+const RAIL_X      = 24;  // px — x of the fixed vertical guide rail
+const PUSHER_W    = 5;   // px — half-width of the pusher plate
+const PUSHER_H    = COIL_R + 10;  // px — half-height of pusher plate
 
-let activeView = 'wave';
+// Slinky wave speed: double the main CFL so compressions travel faster
+const SLINKY_CFL  = CFL * 2;              // = 0.8 (still CFL-stable)
+const SLINKY_CFL2 = SLINKY_CFL * SLINKY_CFL;
+const SLINKY_MUR  = (SLINKY_CFL - 1) / (SLINKY_CFL + 1); // Mur ABC for slinky
+
+let activeView = 'slinky';
 
 function drawSlinky(alpha) {
   if (!sCur) return;
   const W  = canvas.width;
   const H  = canvas.height;
-  const cx = W / 2;
+  const controlsBottom = document.getElementById('controls').getBoundingClientRect().bottom;
+  const cy = (controlsBottom + H) / 2;
 
   ctx.clearRect(0, 0, W, H);
   ctx.fillStyle = darkMode ? '#111' : '#f7f6f0';
   ctx.fillRect(0, 0, W, H);
 
-  const fg   = darkMode ? 'rgba(255,255,255,0.18)' : 'rgba(0,0,0,0.15)';
-  const fg2  = darkMode ? 'rgba(255,255,255,0.45)' : 'rgba(0,0,0,0.40)';
+  drawGrid(cy);
 
-  // ── Horizontal rail ──────────────────────────────────────
+  const fg  = darkMode ? 'rgba(255,255,255,0.18)' : 'rgba(0,0,0,0.15)';
+  const fg2 = darkMode ? 'rgba(255,255,255,0.45)' : 'rgba(0,0,0,0.40)';
+
+  // ── Vertical guide rail (fixed on left) ─────────────────────
   ctx.strokeStyle = fg2;
   ctx.lineWidth   = 2;
   ctx.beginPath();
-  ctx.moveTo(cx - PLATE_W * 3, RAIL_H);
-  ctx.lineTo(cx + PLATE_W * 3, RAIL_H);
+  ctx.moveTo(RAIL_X, cy - PUSHER_H - 10);
+  ctx.lineTo(RAIL_X, cy + PUSHER_H + 10);
   ctx.stroke();
 
-  // ── Sliding plate ─────────────────────────────────────────
+  // ── Pusher plate (slides left-right along the rail) ──────────
+  // Longitudinal driver: displacement is along the wave axis (x).
   const plateDisp = sPrev[0] + (sCur[0] - sPrev[0]) * alpha;
-  const plateX    = cx + plateDisp;
+  const pusherX   = SLINKY_OFF + plateDisp;
 
-  ctx.fillStyle   = fg2;
-  ctx.fillRect(plateX - PLATE_W, RAIL_H - PLATE_H / 2, PLATE_W * 2, PLATE_H);
+  ctx.fillStyle = fg2;
+  ctx.fillRect(pusherX - PUSHER_W, cy - PUSHER_H, PUSHER_W * 2, PUSHER_H * 2);
 
-  // Vertical connector from plate down to first slinky particle
+  // Horizontal arm connecting rail to pusher plate
   ctx.strokeStyle = fg;
   ctx.lineWidth   = 2;
   ctx.beginPath();
-  ctx.moveTo(plateX, RAIL_H + PLATE_H / 2);
-  ctx.lineTo(plateX, SLINKY_OFF);
+  ctx.moveTo(RAIL_X, cy);
+  ctx.lineTo(pusherX - PUSHER_W, cy);
   ctx.stroke();
 
-  // ── Slinky wire ───────────────────────────────────────────
-  ctx.beginPath();
-  for (let i = 0; i < sN; i++) {
-    const y    = SLINKY_OFF + i * SLINKY_SP;
-    const disp = sPrev[i] + (sCur[i] - sPrev[i]) * alpha;
-    const coil = COIL_R * Math.sin((y / COIL_PITCH) * Math.PI * 2);
-    const x    = cx + disp + coil;
-    if (i === 0) ctx.moveTo(x, y);
-    else         ctx.lineTo(x, y);
+  // ── Slinky wire ──────────────────────────────────────────────
+  const slinkyEnd    = SLINKY_OFF + (sN - 1) * SLINKY_SP;
+  const quarterPitch = COIL_PITCH / 4;
+  const SLINKY_LINE_W = 8; // must match ctx.lineWidth below
+
+  // In triangle mode: 1 vertex per quarter-pitch (3 pts per half-cycle).
+  // In smooth mode:  10 sub-vertices per quarter-pitch for a curved path.
+  const SUB      = 100;
+  const step     = quarterPitch / SUB;   // equilibrium spacing between vertices
+  const hcStride = 2 * SUB;             // vertex count per half-cycle
+
+  let zeroCrossX    = pusherX + PUSHER_W;
+  let sectionStartX = zeroCrossX;
+
+  // Pass 1: generate vertices with no-crossing clamping.
+  // Section boundaries occur at every quarter-pitch (both zero crossings AND peaks).
+  //   • Zero crossings (k % hcStride === 0): enforce SLINKY_LINE_W gap so adjacent
+  //     half-cycles don't overdraw each other.
+  //   • Peaks (k % SUB === 0 but not a zero crossing): no gap — they're the shared
+  //     tip of the up and down sections — but sectionStartX advances to peak x so the
+  //     down-slope sub-vertices can't slide back left through the up-stroke.
+  //   • Sub-vertices within a quarter-section: clamp to that section's start x only.
+  const verts = [];
+  for (let k = 0; ; k++) {
+    const xEq = SLINKY_OFF + k * step;
+    if (xEq > slinkyEnd) break;
+
+    const fi   = (xEq - SLINKY_OFF) / SLINKY_SP;
+    const i0   = Math.max(0, Math.min(sN - 2, Math.floor(fi)));
+    const frac = fi - i0;
+    const d0   = sPrev[i0]     + (sCur[i0]     - sPrev[i0])     * alpha;
+    const d1   = sPrev[i0 + 1] + (sCur[i0 + 1] - sPrev[i0 + 1]) * alpha;
+    const disp = d0 + (d1 - d0) * frac;
+
+    let x;
+    if (k % hcStride === 0) {
+      // Zero crossing: enforce minimum gap from previous zero crossing
+      x = Math.max(zeroCrossX + (k === 0 ? 0 : SLINKY_LINE_W), xEq + disp);
+      zeroCrossX    = x;
+      sectionStartX = x;
+    } else if (k % SUB === 0) {
+      // Peak/trough: shared tip — no gap, but lock sectionStartX so down-slope
+      // sub-vertices can't go left of the peak.
+      x = Math.max(sectionStartX, xEq + disp);
+      sectionStartX = x;
+    } else {
+      // Sub-vertex: clamp to current section's start only
+      x = Math.max(sectionStartX, xEq + disp);
+    }
+
+    const angle = ((xEq - SLINKY_OFF) / COIL_PITCH) * Math.PI * 2 + Math.PI / 2;
+    const sinA  = Math.sin(angle);
+    // Triangle mode: perfect triangle wave.
+    // Smooth mode: blend sine (rounded peaks) with triangle (steep sides).
+    const yCoil = COIL_R * sinA;
+
+    verts.push({ x, y: cy + yCoil, xEq });
   }
 
-  const hue = (Date.now() / 150) % 360;
-  const lit  = darkMode ? 65 : 50;
-  ctx.strokeStyle = `hsl(${hue},90%,${lit}%)`;
-  ctx.lineWidth   = 4;
-  ctx.lineCap     = 'round';
-  ctx.lineJoin    = 'round';
-  ctx.stroke();
+  // Pass 2: draw each sub-segment as its own flat-colour stroke.
+  // Colour computed from equilibrium position — one rainbow per 20 grid squares.
+  const lit = darkMode ? 65 : 50;
+
+  ctx.lineWidth = SLINKY_LINE_W;
+  ctx.lineCap   = 'round';
+  ctx.lineJoin  = 'round';
+
+  if (!toy.inPalette) drawToy(ctx, toy.x, cy, 1.2);
+  drawPaletteItems();
+
+  for (let i = 0; i + 1 < verts.length; i++) {
+    const va  = verts[i];
+    const vb  = verts[i + 1];
+    // One full rainbow every 20 grid squares (20 * GRID_MINOR = 600 px)
+    const hue = Math.round((va.xEq - SLINKY_OFF) / (20 * GRID_MINOR) * 360) % 360;
+    ctx.strokeStyle = `hsl(${hue},90%,${lit}%)`;
+    ctx.beginPath();
+    ctx.moveTo(va.x, va.y);
+    ctx.lineTo(vb.x, vb.y);
+    ctx.stroke();
+  }
+
+  drawSlinkyTies(verts, step);
+  drawDrawings();
 }
 
 // ── Draw ─────────────────────────────────────────────────────
@@ -641,11 +774,9 @@ function drawWave(alpha) {
   // Interpolated position of first particle for stick
   const y0 = cy + (prev[0] + (cur[0] - prev[0]) * alpha);
 
-  // Tilting stick
-  ctx.strokeStyle = targetAmplitude > 0
-    ? (darkMode ? '#bbb' : '#444')
-    : (darkMode ? '#444' : '#bbb');
-  ctx.lineWidth   = 3;
+  // Tilting stick — solid grey, same width as ball diameter
+  ctx.strokeStyle = darkMode ? '#666' : '#999';
+  ctx.lineWidth   = RADIUS * 2;
   ctx.lineCap     = 'round';
   ctx.beginPath();
   ctx.moveTo(-160, cy);
@@ -664,7 +795,7 @@ function drawWave(alpha) {
   }
 
   drawTies(alpha);
-  if (!cup.inPalette) drawCup();
+  if (!cup.inPalette) drawCup(ctx, cup.x, cup.y);
   drawDrawings();
   drawPaletteItems();
 }
@@ -712,8 +843,24 @@ function setupTrack(trackId, valuesId, values, initial, onChange, labels) {
 }
 
 setupTrack('amp-track', 'amp-values', AMP_VALUES, 0, v => {
-  targetAmplitude = v;
+  selectedAmpValue = v;
+  if (driverOn) targetAmplitude = v;
 }, AMP_LABELS);
+
+// Driver ON/OFF toggle
+const driverBtn = document.getElementById('driver-btn');
+driverBtn.addEventListener('click', () => {
+  driverOn = !driverOn;
+  targetAmplitude = driverOn ? selectedAmpValue : 0;
+  driverBtn.textContent = driverOn ? 'OFF' : 'ON';
+  driverBtn.classList.toggle('active', driverOn);
+});
+
+// Pulse — one half-cycle at current amplitude
+document.getElementById('pulse-btn').addEventListener('click', () => {
+  if (activeView === 'wave') { pulsePhase  = 0; }
+  else                       { sPulsePhase = 0; }
+});
 
 setupTrack('freq-track', 'freq-values', FREQ_VALUES, 0, v => {
   frequency = v;
@@ -738,7 +885,8 @@ pauseBtn.addEventListener('click', () => {
 });
 
 stepBtn.addEventListener('click', () => {
-  step();
+  if (activeView === 'slinky') slinkyStep();
+  else                         step();
   draw(1);
 });
 
@@ -758,12 +906,19 @@ document.getElementById('sound-cb').addEventListener('change', e => {
 });
 
 // View tabs
+const toyLabel = document.getElementById('toy-label');
+function updateToyLabel() { toyLabel.textContent = activeView === 'slinky' ? 'TOY' : 'CUP'; }
+
 document.querySelectorAll('.view-btn').forEach(btn => {
   btn.addEventListener('click', () => {
     activeView = btn.dataset.view;
     document.querySelectorAll('.view-btn').forEach(b => b.classList.toggle('active', b === btn));
+    updateToyLabel();
+    // Cancel any in-progress draw when switching views
+    activeDraw = null; draggedLine = null; draggedEndpoint = null;
   });
 });
+updateToyLabel(); // set on init
 
 // Draw mode toggle
 document.getElementById('draw-btn').addEventListener('click', () => {
@@ -772,16 +927,21 @@ document.getElementById('draw-btn').addEventListener('click', () => {
   canvas.style.cursor = drawMode ? 'crosshair' : 'default';
 });
 
-// Clear all
+// Clear — clears the current view's ties and drawings
 document.getElementById('clear-all-btn').addEventListener('click', () => {
-  ties      = [];
-  drawings  = [];
+  curDrawings().length = 0;
+  curTies().length     = 0;
   activeDraw      = null;
   draggedLine     = null;
   draggedEndpoint = null;
-  cup.inPalette = true;
-  cup.vx = cup.vy = 0;
-  cup.resting = true;
+  if (activeView === 'slinky') {
+    toy.inPalette = true;
+    toy.vx = 0;
+  } else {
+    cup.inPalette = true;
+    cup.vx = cup.vy = 0;
+    cup.resting = true;
+  }
 });
 
 // ── Drag handling ─────────────────────────────────────────────
@@ -806,7 +966,7 @@ canvas.addEventListener('mousedown', e => {
     }
     const hitIdx = nearMidpoint(mx, my);
     if (hitIdx >= 0) {
-      const m = lineMidpoint(drawings[hitIdx]);
+      const m = lineMidpoint(curDrawings()[hitIdx]);
       draggedLine = { index: hitIdx, offX: m.x - mx, offY: m.y - my };
       e.preventDefault(); return;
     }
@@ -815,46 +975,95 @@ canvas.addEventListener('mousedown', e => {
   }
 
   // Ties take priority over cup
-  const cy = canvas.height / 2 + CY_OFFSET;
-  for (const tie of ties) {
-    if (Math.abs(mx - tie.x) < TIE_W + 5 && Math.abs(my - cy) < TIE_H + 5) {
-      tie.dragging  = true;
-      tie.dragOffX  = tie.x - mx;
-      tie.dragOffY  = cy - my;
-      e.preventDefault(); return;
+  if (activeView === 'slinky') {
+    const cb = document.getElementById('controls').getBoundingClientRect().bottom;
+    const cy = (cb + canvas.height) / 2;
+    for (const tie of slinkyTies) {
+      let tieX = tie.x, tieY = tie.y;
+      if (!tie.dragging && tie.slinkyParticleIndex >= 0) {
+        const pi  = tie.slinkyParticleIndex;
+        tieX = tie.xEq + sCur[pi];
+        const angle = (tie.xEq - SLINKY_OFF) / COIL_PITCH * Math.PI * 2 + Math.PI / 2;
+        tieY = cy + COIL_R * Math.sin(angle);
+      }
+      if (Math.abs(mx - tieX) < TIE_W + 8 && Math.abs(my - tieY) < TIE_H + 8) {
+        tie.dragging  = true;
+        tie.dragOffX  = tieX - mx;
+        tie.dragOffY  = tieY - my;
+        tie.slinkyParticleIndex = -1; // detach while dragging
+        tie.x = tieX; tie.y = tieY;
+        e.preventDefault(); return;
+      }
+    }
+  } else {
+    const cy = canvas.height / 2 + CY_OFFSET;
+    for (const tie of stringTies) {
+      const tieY = tie.dragging ? tie.y : cy;
+      if (Math.abs(mx - tie.x) < TIE_W + 5 && Math.abs(my - tieY) < TIE_H + 5) {
+        tie.dragging  = true;
+        tie.dragOffX  = tie.x - mx;
+        tie.dragOffY  = tieY - my;
+        e.preventDefault(); return;
+      }
     }
   }
 
-  if (!cup.inPalette && cupHitTest(mx, my)) {
-    cup.dragging = true;
-    cup.resting  = false;
-    cup.vx = cup.vy = 0;
-    cup.dragOffX = cup.x - mx;
-    cup.dragOffY = cup.y - my;
-    e.preventDefault();
+  if (activeView === 'slinky') {
+    if (!toy.inPalette) {
+      const cb = document.getElementById('controls').getBoundingClientRect().bottom;
+      const slinkyCy = (cb + canvas.height) / 2;
+      if (toyHitTest(mx, my, slinkyCy)) {
+        toy.dragging = true;
+        toy.dragOffX = toy.x - mx;
+        toy.vx = 0;
+        e.preventDefault();
+      }
+    }
+  } else {
+    if (!cup.inPalette && cupHitTest(mx, my)) {
+      cup.dragging = true;
+      cup.resting  = false;
+      cup.vx = cup.vy = 0;
+      cup.dragOffX = cup.x - mx;
+      cup.dragOffY = cup.y - my;
+      e.preventDefault();
+    }
   }
 });
 
-// Drag from palette — cup
+// Drag from palette — toy (slinky) or cup (string)
 document.getElementById('cup-palette').addEventListener('mousedown', e => {
-  if (!cup.inPalette) return;
   const [mx, my] = canvasMouse(e);
-  cup.inPalette = false;
-  cup.dragging  = true;
-  cup.resting   = false;
-  cup.vx = cup.vy = 0;
-  // cup.y is the base; offset so cursor is at the rim, keeping the cup body visible
-  cup.x = mx;
-  cup.y = my + CUP_H;
-  cup.dragOffX = 0;
-  cup.dragOffY = CUP_H;
+  if (activeView === 'slinky') {
+    if (!toy.inPalette) return;
+    toy.inPalette = false;
+    toy.dragging  = true;
+    toy.x = mx;
+    toy.vx = 0;
+    toy.dragOffX = 0;
+    toy.iL = toy.iR = -1;
+  } else {
+    if (!cup.inPalette) return;
+    cup.inPalette = false;
+    cup.dragging  = true;
+    cup.resting   = false;
+    cup.vx = cup.vy = 0;
+    cup.x = mx;
+    cup.y = my + CUP_H;
+    cup.dragOffX = 0;
+    cup.dragOffY = CUP_H;
+  }
   e.preventDefault();
 });
 
 // Drag from palette — tie (unlimited supply)
 document.getElementById('tie-palette').addEventListener('mousedown', e => {
   const [mx, my] = canvasMouse(e);
-  ties.push({ x: mx, y: my, particleIndex: -1, dragging: true, dragOffX: 0, dragOffY: 0 });
+  if (activeView === 'slinky') {
+    slinkyTies.push({ x: mx, y: my, slinkyParticleIndex: -1, xEq: 0, dragging: true, dragOffX: 0, dragOffY: 0 });
+  } else {
+    stringTies.push({ x: mx, y: my, particleIndex: -1, dragging: true, dragOffX: 0, dragOffY: 0 });
+  }
   e.preventDefault();
 });
 
@@ -863,6 +1072,7 @@ window.addEventListener('mousemove', e => {
   const [mx, my] = canvasMouse(e);
 
   if (drawMode) {
+    const drawings = curDrawings();
     if (activeDraw) {
       activeDraw.x2 = snapX(mx);
       activeDraw.y2 = snapY(my);
@@ -892,17 +1102,22 @@ window.addEventListener('mousemove', e => {
   }
 
   if (cup.dragging) { cup.x = mx + cup.dragOffX; cup.y = my + cup.dragOffY; }
+  if (toy.dragging) { toy.x = mx + toy.dragOffX; }
 
-  for (const tie of ties) {
+  for (const tie of curTies()) {
     if (tie.dragging) { tie.x = mx + tie.dragOffX; tie.y = my + tie.dragOffY; }
   }
 
-  const anyDrag = cup.dragging || ties.some(t => t.dragging);
+  const anyDrag = cup.dragging || toy.dragging || curTies().some(t => t.dragging);
   if (!anyDrag) {
-    const cy = canvas.height / 2 + CY_OFFSET;
-    const overCup = !cup.inPalette && cupHitTest(mx, my);
-    const overTie = ties.some(t => Math.abs(mx - t.x) < TIE_W + 5 && Math.abs(my - cy) < TIE_H + 5);
-    canvas.style.cursor = (overCup || overTie) ? 'grab' : 'default';
+    let overGrab = false;
+    if (activeView === 'slinky' && !toy.inPalette) {
+      const cb = document.getElementById('controls').getBoundingClientRect().bottom;
+      overGrab = toyHitTest(mx, my, (cb + canvas.height) / 2);
+    } else if (activeView === 'wave' && !cup.inPalette) {
+      overGrab = cupHitTest(mx, my);
+    }
+    canvas.style.cursor = overGrab ? 'grab' : 'default';
   }
 });
 
@@ -912,7 +1127,7 @@ window.addEventListener('mouseup', e => {
     if (activeDraw) {
       // Only keep lines with meaningful length
       if (Math.hypot(activeDraw.x2 - activeDraw.x1, activeDraw.y2 - activeDraw.y1) > 4) {
-        drawings.push({ ...activeDraw });
+        curDrawings().push({ ...activeDraw });
       }
       activeDraw = null;
     }
@@ -925,18 +1140,64 @@ window.addEventListener('mouseup', e => {
     cup.dragging = false;
     cup.resting  = true;
     canvas.style.cursor = 'default';
+    // Return to palette if off-canvas or dropped behind the controls panel
+    const cr  = canvas.getBoundingClientRect();
+    const ctr = document.getElementById('controls').getBoundingClientRect();
+    const scaleX = canvas.width  / cr.width;
+    const scaleY = canvas.height / cr.height;
+    const ctrlL = (ctr.left   - cr.left) * scaleX;
+    const ctrlR = (ctr.right  - cr.left) * scaleX;
+    const ctrlT = (ctr.top    - cr.top)  * scaleY;
+    const ctrlB = (ctr.bottom - cr.top)  * scaleY;
+    const cupTop = cup.y - CUP_H;
+    const hidden = cup.x > ctrlL && cup.x < ctrlR && cupTop < ctrlB && cup.y > ctrlT;
+    if (cup.x < -CUP_TW || cup.x > canvas.width + CUP_TW || hidden) {
+      cup.inPalette = true;
+      cup.vx = cup.vy = 0;
+      cup.resting = true;
+    }
   }
 
-  for (let i = ties.length - 1; i >= 0; i--) {
-    const tie = ties[i];
-    if (!tie.dragging) continue;
-    tie.dragging = false;
-    const pi = Math.round((tie.x - OFFSET) / SPACING);
-    if (pi >= 1 && pi <= N - 2) {
-      tie.particleIndex = pi;
-      tie.x = OFFSET + pi * SPACING;
+  if (toy.dragging) {
+    toy.dragging = false;
+    canvas.style.cursor = 'default';
+    if (toy.x < SLINKY_OFF || toy.x > canvas.width + 60) {
+      toy.inPalette = true;
+      toy.vx = 0;
+      toy.iL = toy.iR = -1;
     } else {
-      ties.splice(i, 1); // dropped off string — discard
+      // Lock flanking particle indices at drop position
+      toy.iL = Math.max(1, Math.min(sN - 2, Math.floor((toy.x - SLINKY_OFF) / SLINKY_SP)));
+      toy.iR = Math.min(sN - 2, toy.iL + 1);
+    }
+  }
+
+  if (activeView === 'slinky') {
+    for (let i = slinkyTies.length - 1; i >= 0; i--) {
+      const tie = slinkyTies[i];
+      if (!tie.dragging) continue;
+      tie.dragging = false;
+      // Snap to nearest slinky particle by x
+      const pi = Math.round((tie.x - SLINKY_OFF) / SLINKY_SP);
+      if (pi >= 1 && pi <= sN - 2 && tie.x >= 0 && tie.x <= canvas.width + 60) {
+        tie.slinkyParticleIndex = pi;
+        tie.xEq = SLINKY_OFF + pi * SLINKY_SP;
+      } else {
+        slinkyTies.splice(i, 1); // off canvas — discard
+      }
+    }
+  } else {
+    for (let i = stringTies.length - 1; i >= 0; i--) {
+      const tie = stringTies[i];
+      if (!tie.dragging) continue;
+      tie.dragging = false;
+      const pi = Math.round((tie.x - OFFSET) / SPACING);
+      if (pi >= 1 && pi <= N - 2) {
+        tie.particleIndex = pi;
+        tie.x = OFFSET + pi * SPACING;
+      } else {
+        stringTies.splice(i, 1); // dropped off string — discard
+      }
     }
   }
 });

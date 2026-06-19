@@ -15,23 +15,30 @@
       <div class="ctrl-group">
         <div class="ctrl-label">VIEW</div>
         <div class="view-btns">
-          <button class="view-btn active" data-view="wave">WAVE</button>
-          <button class="view-btn" data-view="slinky">SLINKY</button>
+          <button class="view-btn" data-view="wave">STRING</button>
+          <button class="view-btn active" data-view="slinky">SLINKY</button>
         </div>
       </div>
 
       <div class="ctrl-group">
         <div class="ctrl-label">AMPLITUDE</div>
-        <div class="step-track" id="amp-track">
-          <div class="track-line"></div>
-          <div class="notches">
-            <button class="notch active"></button>
-            <button class="notch"></button>
-            <button class="notch"></button>
-            <button class="notch"></button>
+        <div class="amp-row">
+          <div class="amp-btns">
+            <button id="driver-btn" class="amp-btn">ON</button>
+            <button id="pulse-btn"  class="amp-btn">PULSE</button>
+          </div>
+          <div>
+            <div class="step-track" id="amp-track">
+              <div class="track-line"></div>
+              <div class="notches">
+                <button class="notch active"></button>
+                <button class="notch"></button>
+                <button class="notch"></button>
+              </div>
+            </div>
+            <div class="step-values" id="amp-values"></div>
           </div>
         </div>
-        <div class="step-values" id="amp-values"></div>
       </div>
 
       <div class="ctrl-group">
@@ -74,13 +81,21 @@
       </div>
 
       <div class="ctrl-group objects-group">
-        <div class="ctrl-label">OBJECTS</div>
         <div class="palette-row">
-          <canvas id="cup-palette"  class="palette-slot" width="36" height="46" title="Drag cup onto canvas"></canvas>
-          <canvas id="tie-palette"  class="palette-slot" width="24" height="46" title="Drag twist tie onto string"></canvas>
-          <button id="draw-btn" class="draw-toggle" title="Draw measurement line">•–•</button>
+          <div class="palette-item">
+            <canvas id="cup-palette" class="palette-slot" width="36" height="46" title="Drag bone toy onto canvas"></canvas>
+            <span class="palette-label" id="toy-label">CUP</span>
+          </div>
+          <div class="palette-item">
+            <canvas id="tie-palette" class="palette-slot" width="36" height="46" title="Drag twist tie onto string"></canvas>
+            <span class="palette-label">TIE</span>
+          </div>
+          <div class="palette-item">
+            <button id="draw-btn" class="draw-toggle" title="Draw measurement line"><svg width="10" height="34" viewBox="0 0 10 34" xmlns="http://www.w3.org/2000/svg"><line x1="5" y1="4" x2="5" y2="30" stroke="currentColor" stroke-width="1.5"/><circle cx="5" cy="4" r="4" fill="currentColor"/><circle cx="5" cy="30" r="4" fill="currentColor"/></svg></button>
+            <span class="palette-label">LINE</span>
+          </div>
         </div>
-        <button id="clear-all-btn" class="clear-all-btn">CLEAR ALL</button>
+        <button id="clear-all-btn" class="clear-all-btn">CLEAR</button>
       </div>
     </div>
   </div>
