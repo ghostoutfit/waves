@@ -556,7 +556,8 @@ function slinkyStep() {
     const velL = sNext[toy.iL] - sCur[toy.iL];
     const velR = sNext[toy.iR] - sCur[toy.iR];
 
-    toy.x += (velL + velR) / 2;
+    // Directly place bone at the midpoint of the two flanking particle positions.
+    toy.x = SLINKY_OFF + (toy.iL + 0.5) * SLINKY_SP + (sNext[toy.iL] + sNext[toy.iR]) / 2;
 
     if (velL > 0 && velR < 0) {
       playSqueak((velL - velR) / 2);
@@ -1169,6 +1170,8 @@ window.addEventListener('mouseup', e => {
       // Lock flanking particle indices at drop position
       toy.iL = Math.max(1, Math.min(sN - 2, Math.floor((toy.x - SLINKY_OFF) / SLINKY_SP)));
       toy.iR = Math.min(sN - 2, toy.iL + 1);
+      // Snap x to exact coil boundary so positional tracking starts without a jump
+      toy.x = SLINKY_OFF + (toy.iL + 0.5) * SLINKY_SP + (sCur[toy.iL] + sCur[toy.iR]) / 2;
     }
   }
 
