@@ -971,7 +971,7 @@ canvas.addEventListener('mousedown', e => {
       draggedLine = { index: hitIdx, offX: m.x - mx, offY: m.y - my };
       e.preventDefault(); return;
     }
-    activeDraw = { x1: snapX(mx), y1: snapY(my), x2: snapX(mx), y2: snapY(my) };
+    activeDraw = { x1: mx, y1: my, x2: mx, y2: my };
     e.preventDefault(); return;
   }
 
@@ -1075,14 +1075,14 @@ window.addEventListener('mousemove', e => {
   if (drawMode) {
     const drawings = curDrawings();
     if (activeDraw) {
-      activeDraw.x2 = snapX(mx);
-      activeDraw.y2 = snapY(my);
+      activeDraw.x2 = mx;
+      activeDraw.y2 = my;
     } else if (draggedEndpoint !== null) {
       const d = drawings[draggedEndpoint.index];
       if (draggedEndpoint.which === 1) {
-        drawings[draggedEndpoint.index] = { ...d, x1: snapX(mx), y1: snapY(my) };
+        drawings[draggedEndpoint.index] = { ...d, x1: mx, y1: my };
       } else {
-        drawings[draggedEndpoint.index] = { ...d, x2: snapX(mx), y2: snapY(my) };
+        drawings[draggedEndpoint.index] = { ...d, x2: mx, y2: my };
       }
     } else if (draggedLine !== null) {
       const d = drawings[draggedLine.index];
