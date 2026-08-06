@@ -81,22 +81,14 @@ let cup = {
   dragOffX: 0, dragOffY: 0,
 };
 
-// ── Toy (slinky mode) — bone sprite, bounces between coils ──
-const TOY_HW = 14;  // half-width for collision (px)
-const TOY_HH = 7;   // shaft half-height for collision (px)
-const TOY_KR = 11;  // knob radius for hit-test (px)
-const TOY_FRICTION = 0.965;
-
-// Bone sprite — loaded once, drawn rotated 90° so it sits horizontally
-const boneImg = new Image();
-boneImg.src = 'images/Bone.png';
-
+// ── Cup (slinky mode) — same cup sprite as wave mode ─────────
 let toy = {
-  x: 0, vx: 0,
+  x: 0, y: 0,
+  vx: 0,
   inPalette: true,
+  resting: true,
   dragging: false,
-  dragOffX: 0,
-  iL: -1, iR: -1,  // flanking particle indices, fixed at drop time
+  dragOffX: 0, dragOffY: 0,
 };
 
 
@@ -212,6 +204,21 @@ function updateCup() {
   }
 }
 
+function updateToy() {
+  if (toy.dragging || toy.resting || toy.inPalette) return;
+  toy.vx *= CUP_FRICTION;
+  toy.x  += toy.vx;
+  if (Math.abs(toy.vx) < 0.05) {
+    toy.vx = 0;
+    toy.resting = true;
+  }
+  if (toy.x < -CUP_TW - 4 || toy.x > canvas.width + CUP_TW + 4) {
+    toy.inPalette = true;
+    toy.vx = 0;
+    toy.resting = true;
+  }
+}
+
 function drawCup(c, x, y, s) {
   // c = context, s = uniform scale factor (1 for canvas, ~0.65 for palette)
   s = s || 1;
@@ -256,20 +263,9 @@ function cupHitTest(mx, my) {
   return dx > -(CUP_TW + 6) && dx < (CUP_TW + 6) && dy > -(CUP_H + 6) && dy < 6;
 }
 
-function drawToy(c, x, y, scale) {
-  if (!boneImg.complete || !boneImg.naturalWidth) return;
-  const s  = scale || 1;
-  // Bone image is tall/portrait (241×500) — draw upright, preserve aspect ratio.
-  // Display size: 30×62 px at scale=1.
-  const dw = 30 * s, dh = 62 * s;
-  c.save();
-  c.translate(x, y);
-  c.drawImage(boneImg, -dw / 2, -dh / 2, dw, dh);
-  c.restore();
-}
-
-function toyHitTest(mx, my, slinkyCy) {
-  return Math.abs(mx - toy.x) < TOY_HW + 8 && Math.abs(my - slinkyCy) < TOY_KR + 8;
+function slinkyToyHitTest(mx, my) {
+  const dx = mx - toy.x, dy = my - toy.y;
+  return dx > -(CUP_TW + 6) && dx < (CUP_TW + 6) && dy > -(CUP_H + 6) && dy < 6;
 }
 
 function drawTieAt(c, x, y) {
@@ -346,13 +342,8 @@ function drawPaletteItems() {
   const pc = paletteCupCtx;
   const pw = pc.canvas.width, ph = pc.canvas.height;
   pc.clearRect(0, 0, pw, ph);
-  if (activeView === 'slinky') {
-    pc.globalAlpha = toy.inPalette ? 1 : 0.25;
-    drawToy(pc, pw / 2, ph / 2, 0.765);
-  } else {
-    pc.globalAlpha = cup.inPalette ? 1 : 0.2;
-    drawCup(pc, pw / 2, ph - 8, 0.65);
-  }
+  pc.globalAlpha = (activeView === 'slinky' ? toy.inPalette : cup.inPalette) ? 1 : 0.2;
+  drawCup(pc, pw / 2, ph - 8, 0.65);
   pc.globalAlpha = 1;
 
   // Tie palette
@@ -455,7 +446,7 @@ function resize() {
   }
 
   // Slinky sim: fixed 50 grid squares long (50 × GRID_MINOR = 1500 px), extending off-screen if needed
-  const newSN = Math.max(4, Math.floor(50 * GRID_MINOR / SLINKY_SP) + 2);
+  const newSN = Math.floor((8 * GRID_W - 4 * GRID_MINOR) / SLINKY_SP) + 1;  // 8 big squares minus 4 small
   if (newSN !== sN) {
     sN   = newSN;
     sCur  = new Float32Array(sN);
@@ -547,25 +538,25 @@ function slinkyStep() {
     if (Math.abs(sNext[i]) < 0.15 && Math.abs(sCur[i]) < 0.15) sNext[i] = 0;
   }
 
-  // ── Toy motion (slinky mode) ────────────────────────────────
-  // Bone is locked between particles iL and iR (set at drop time).
-  // Each step it moves by exactly the average VELOCITY of those two particles —
-  // tracking how much they moved, not where they are absolutely.
-  // This avoids jumps from initial displacement and oscillation runaway.
-  if (activeView === 'slinky' && !toy.inPalette && !toy.dragging && toy.iL >= 1 && toy.iR >= 1) {
-    const velL = sNext[toy.iL] - sCur[toy.iL];
-    const velR = sNext[toy.iR] - sCur[toy.iR];
-
-    // Directly place bone at the midpoint of the two flanking particle positions.
-    toy.x = SLINKY_OFF + (toy.iL + 0.5) * SLINKY_SP + (sNext[toy.iL] + sNext[toy.iR]) / 2;
-
-    if (velL > 0 && velR < 0) {
-      playSqueak((velL - velR) / 2);
+  // ── Cup collision (slinky mode) ──────────────────────────────
+  // Watch the single particle just to the LEFT of the cup's left face.
+  // When the compression front pushes it across that edge, kick the cup rightward.
+  // Particles near the cup center are already inside the x-range at equilibrium,
+  // so only the left-face crossing gives a clean one-shot trigger per wave front.
+  if (activeView === 'slinky' && !toy.inPalette && !toy.dragging) {
+    const iHit  = Math.max(1, Math.floor((toy.x - CUP_TW - SLINKY_OFF) / SLINKY_SP));
+    const curX  = SLINKY_OFF + iHit * SLINKY_SP + sCur[iHit];
+    const nextX = SLINKY_OFF + iHit * SLINKY_SP + sNext[iHit];
+    const vel   = sNext[iHit] - sCur[iHit];
+    if (curX < toy.x - CUP_TW && nextX >= toy.x - CUP_TW && vel > 0) {
+      const energyVx  = selectedAmpValue * frequency * 0.8 * 4 / 27;
+      // minimum vx to guarantee cup left edge ends up past the slinky end
+      const slinkyEnd = SLINKY_OFF + (sN - 1) * SLINKY_SP;
+      const clearDist = Math.max(0, slinkyEnd + 4 - (toy.x - CUP_TW));
+      const minVx     = clearDist * (1 - CUP_FRICTION);
+      toy.vx      = Math.max(energyVx, minVx);
+      toy.resting = false;
     }
-
-    const minX = SLINKY_OFF + 4;
-    if (toy.x < minX) { toy.x = minX; }
-    if (toy.x > canvas.width + 60) { toy.inPalette = true; toy.iL = toy.iR = -1; }
   }
 
   const t = sPrev; sPrev = sCur; sCur = sNext; sNext = t;
@@ -739,7 +730,6 @@ function drawSlinky(alpha) {
   ctx.lineCap   = 'round';
   ctx.lineJoin  = 'round';
 
-  if (!toy.inPalette) drawToy(ctx, toy.x, cy, 1.2);
   drawPaletteItems();
 
   for (let i = 0; i + 1 < verts.length; i++) {
@@ -754,6 +744,7 @@ function drawSlinky(alpha) {
     ctx.stroke();
   }
 
+  if (!toy.inPalette) drawCup(ctx, toy.x, toy.y);
   drawSlinkyTies(verts, step);
   drawDrawings();
 }
@@ -817,6 +808,7 @@ function loop() {
     }
   }
   updateCup();
+  updateToy();
   draw(simAccum);
   requestAnimationFrame(loop);
 }
@@ -908,7 +900,7 @@ document.getElementById('sound-cb').addEventListener('change', e => {
 
 // View tabs
 const toyLabel = document.getElementById('toy-label');
-function updateToyLabel() { toyLabel.textContent = activeView === 'slinky' ? 'TOY' : 'CUP'; }
+function updateToyLabel() { toyLabel.textContent = 'CUP'; }
 
 document.querySelectorAll('.view-btn').forEach(btn => {
   btn.addEventListener('click', () => {
@@ -938,6 +930,7 @@ document.getElementById('clear-all-btn').addEventListener('click', () => {
   if (activeView === 'slinky') {
     toy.inPalette = true;
     toy.vx = 0;
+    toy.resting = true;
   } else {
     cup.inPalette = true;
     cup.vx = cup.vy = 0;
@@ -1010,15 +1003,13 @@ canvas.addEventListener('mousedown', e => {
   }
 
   if (activeView === 'slinky') {
-    if (!toy.inPalette) {
-      const cb = document.getElementById('controls').getBoundingClientRect().bottom;
-      const slinkyCy = (cb + canvas.height) / 2;
-      if (toyHitTest(mx, my, slinkyCy)) {
-        toy.dragging = true;
-        toy.dragOffX = toy.x - mx;
-        toy.vx = 0;
-        e.preventDefault();
-      }
+    if (!toy.inPalette && slinkyToyHitTest(mx, my)) {
+      toy.dragging = true;
+      toy.vx       = 0;
+      toy.resting  = true;
+      toy.dragOffX = toy.x - mx;
+      toy.dragOffY = toy.y - my;
+      e.preventDefault();
     }
   } else {
     if (!cup.inPalette && cupHitTest(mx, my)) {
@@ -1040,9 +1031,9 @@ document.getElementById('cup-palette').addEventListener('mousedown', e => {
     toy.inPalette = false;
     toy.dragging  = true;
     toy.x = mx;
-    toy.vx = 0;
+    toy.y = my + CUP_H;
     toy.dragOffX = 0;
-    toy.iL = toy.iR = -1;
+    toy.dragOffY = CUP_H;
   } else {
     if (!cup.inPalette) return;
     cup.inPalette = false;
@@ -1103,7 +1094,7 @@ window.addEventListener('mousemove', e => {
   }
 
   if (cup.dragging) { cup.x = mx + cup.dragOffX; cup.y = my + cup.dragOffY; }
-  if (toy.dragging) { toy.x = mx + toy.dragOffX; }
+  if (toy.dragging) { toy.x = mx + toy.dragOffX; toy.y = my + toy.dragOffY; }
 
   for (const tie of curTies()) {
     if (tie.dragging) { tie.x = mx + tie.dragOffX; tie.y = my + tie.dragOffY; }
@@ -1114,7 +1105,7 @@ window.addEventListener('mousemove', e => {
     let overGrab = false;
     if (activeView === 'slinky' && !toy.inPalette) {
       const cb = document.getElementById('controls').getBoundingClientRect().bottom;
-      overGrab = toyHitTest(mx, my, (cb + canvas.height) / 2);
+      overGrab = slinkyToyHitTest(mx, my);
     } else if (activeView === 'wave' && !cup.inPalette) {
       overGrab = cupHitTest(mx, my);
     }
@@ -1161,17 +1152,11 @@ window.addEventListener('mouseup', e => {
 
   if (toy.dragging) {
     toy.dragging = false;
+    toy.resting  = true;
     canvas.style.cursor = 'default';
-    if (toy.x < SLINKY_OFF || toy.x > canvas.width + 60) {
+    if (toy.x < -CUP_TW || toy.x > canvas.width + CUP_TW
+     || toy.y < -CUP_H  || toy.y > canvas.height + 4) {
       toy.inPalette = true;
-      toy.vx = 0;
-      toy.iL = toy.iR = -1;
-    } else {
-      // Lock flanking particle indices at drop position
-      toy.iL = Math.max(1, Math.min(sN - 2, Math.floor((toy.x - SLINKY_OFF) / SLINKY_SP)));
-      toy.iR = Math.min(sN - 2, toy.iL + 1);
-      // Snap x to exact coil boundary so positional tracking starts without a jump
-      toy.x = SLINKY_OFF + (toy.iL + 0.5) * SLINKY_SP + (sCur[toy.iL] + sCur[toy.iR]) / 2;
     }
   }
 
