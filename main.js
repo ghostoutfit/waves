@@ -466,7 +466,7 @@ function step() {
   phase += 2 * Math.PI * frequency * DT;
 
   if (pulsePhase >= 0) {
-    next[0]    = selectedAmpValue * Math.sin(pulsePhase);
+    next[0]    = -selectedAmpValue * Math.sin(pulsePhase);
     pulsePhase += 2 * Math.PI * frequency * DT;
     if (pulsePhase >= Math.PI) { next[0] = 0; pulsePhase = -1; }
   } else {
