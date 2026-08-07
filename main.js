@@ -804,11 +804,11 @@ function loop() {
     while (simAccum >= 1) {
       step();
       slinkyStep();
+      updateCup();
+      updateToy();
       simAccum -= 1;
     }
   }
-  updateCup();
-  updateToy();
   draw(simAccum);
   requestAnimationFrame(loop);
 }
@@ -880,6 +880,8 @@ pauseBtn.addEventListener('click', () => {
 stepBtn.addEventListener('click', () => {
   if (activeView === 'slinky') slinkyStep();
   else                         step();
+  updateCup();
+  updateToy();
   draw(1);
 });
 
