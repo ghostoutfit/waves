@@ -544,14 +544,15 @@ function slinkyStep() {
   // Particles near the cup center are already inside the x-range at equilibrium,
   // so only the left-face crossing gives a clean one-shot trigger per wave front.
   if (activeView === 'slinky' && !toy.inPalette && !toy.dragging) {
-    const iHit  = Math.max(1, Math.floor((toy.x - CUP_TW - SLINKY_OFF) / SLINKY_SP));
-    const curX  = SLINKY_OFF + iHit * SLINKY_SP + sCur[iHit];
-    const nextX = SLINKY_OFF + iHit * SLINKY_SP + sNext[iHit];
-    const vel   = sNext[iHit] - sCur[iHit];
-    if (curX < toy.x - CUP_TW && nextX >= toy.x - CUP_TW && vel > 0) {
+    const slinkyEnd = SLINKY_OFF + (sN - 1) * SLINKY_SP;
+    // Clamp trigger point to last interior particle so cup anywhere to the right gets hit
+    const triggerX = Math.min(toy.x - CUP_TW, SLINKY_OFF + (sN - 2) * SLINKY_SP + 1);
+    const iHit     = Math.min(sN - 2, Math.max(1, Math.floor((triggerX - SLINKY_OFF) / SLINKY_SP)));
+    const curX     = SLINKY_OFF + iHit * SLINKY_SP + sCur[iHit];
+    const nextX    = SLINKY_OFF + iHit * SLINKY_SP + sNext[iHit];
+    const vel      = sNext[iHit] - sCur[iHit];
+    if (curX < triggerX && nextX >= triggerX && vel > 0) {
       const energyVx  = selectedAmpValue * frequency * 0.8 * 4 / 27;
-      // minimum vx to guarantee cup left edge ends up past the slinky end
-      const slinkyEnd = SLINKY_OFF + (sN - 1) * SLINKY_SP;
       const clearDist = Math.max(0, slinkyEnd + 4 - (toy.x - CUP_TW));
       const minVx     = clearDist * (1 - CUP_FRICTION);
       toy.vx      = Math.max(energyVx, minVx);
@@ -732,15 +733,19 @@ function drawSlinky(alpha) {
 
   drawPaletteItems();
 
+  const clipX = !toy.inPalette ? toy.x - CUP_TW : Infinity;
   for (let i = 0; i + 1 < verts.length; i++) {
     const va  = verts[i];
+    if (va.x >= clipX) break;
     const vb  = verts[i + 1];
-    // One full rainbow every 20 grid squares (20 * GRID_MINOR = 600 px)
     const hue = Math.round((va.xEq - SLINKY_OFF) / (20 * GRID_MINOR) * 360) % 360;
     ctx.strokeStyle = `hsl(${hue},90%,${lit}%)`;
     ctx.beginPath();
     ctx.moveTo(va.x, va.y);
-    ctx.lineTo(vb.x, vb.y);
+    // Clip the endpoint at the cup's left face
+    const bx = Math.min(vb.x, clipX);
+    const by = bx < vb.x ? va.y + (vb.y - va.y) * (bx - va.x) / (vb.x - va.x) : vb.y;
+    ctx.lineTo(bx, by);
     ctx.stroke();
   }
 
@@ -1167,11 +1172,18 @@ window.addEventListener('mouseup', e => {
       const tie = slinkyTies[i];
       if (!tie.dragging) continue;
       tie.dragging = false;
-      // Snap to nearest slinky particle by x
-      const pi = Math.round((tie.x - SLINKY_OFF) / SLINKY_SP);
-      if (pi >= 1 && pi <= sN - 2 && tie.x >= 0 && tie.x <= canvas.width + 60) {
-        tie.slinkyParticleIndex = pi;
-        tie.xEq = SLINKY_OFF + pi * SLINKY_SP;
+      // Snap to nearest particle by actual displaced x (not equilibrium spacing),
+      // so the tie lands on the coil the user can see, even mid-wave or when paused.
+      let bestPi = -1, bestDist = Infinity;
+      for (let pi = 1; pi <= sN - 2; pi++) {
+        const disp    = sPrev[pi] + (sCur[pi] - sPrev[pi]) * simAccum;
+        const actualX = SLINKY_OFF + pi * SLINKY_SP + disp;
+        const dist    = Math.abs(tie.x - actualX);
+        if (dist < bestDist) { bestDist = dist; bestPi = pi; }
+      }
+      if (bestPi >= 0 && tie.x >= 0 && tie.x <= canvas.width + 60) {
+        tie.slinkyParticleIndex = bestPi;
+        tie.xEq = SLINKY_OFF + bestPi * SLINKY_SP;
       } else {
         slinkyTies.splice(i, 1); // off canvas — discard
       }
