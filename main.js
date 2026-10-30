@@ -734,20 +734,33 @@ function drawSlinky(alpha) {
   drawPaletteItems();
 
   const clipX = !toy.inPalette ? toy.x - CUP_TW : Infinity;
+  // Perf: the rainbow is the only reason to split the coil into sub-segments.
+  // Stroking all ~5600 of them individually is the bottleneck on slow machines.
+  // Consecutive segments share almost the same hue, so batch each run of
+  // near-equal hue into ONE polyline and stroke once per colour band.
+  const HUE_BAND = 4; // deg — band width; 4° is imperceptible on an 8px line
+  const hueOf = (xEq) => Math.round((xEq - SLINKY_OFF) / (20 * GRID_MINOR) * 360);
+  let curBand = null, open = false;
+  const flush = () => { if (open) { ctx.stroke(); open = false; } };
   for (let i = 0; i + 1 < verts.length; i++) {
     const va  = verts[i];
     if (va.x >= clipX) break;
     const vb  = verts[i + 1];
-    const hue = Math.round((va.xEq - SLINKY_OFF) / (20 * GRID_MINOR) * 360) % 360;
-    ctx.strokeStyle = `hsl(${hue},90%,${lit}%)`;
-    ctx.beginPath();
-    ctx.moveTo(va.x, va.y);
     // Clip the endpoint at the cup's left face
     const bx = Math.min(vb.x, clipX);
     const by = bx < vb.x ? va.y + (vb.y - va.y) * (bx - va.x) / (vb.x - va.x) : vb.y;
+    const band = Math.round(hueOf(va.xEq) / HUE_BAND) * HUE_BAND;
+    if (band !== curBand) {
+      flush();
+      curBand = band;
+      ctx.strokeStyle = `hsl(${((band % 360) + 360) % 360},90%,${lit}%)`;
+      ctx.beginPath();
+      ctx.moveTo(va.x, va.y);
+      open = true;
+    }
     ctx.lineTo(bx, by);
-    ctx.stroke();
   }
+  flush();
 
   if (!toy.inPalette) drawCup(ctx, toy.x, toy.y);
   drawSlinkyTies(verts, step);
