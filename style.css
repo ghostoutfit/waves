@@ -445,15 +445,7 @@ body.dark .speed-icon { filter: brightness(10); }
 
 .turtle-icon { height: 18px; }
 
-.rabbit-icon {
-  font-size: 20px;
-  line-height: 1;
-  filter: brightness(0);
-  width: auto;
-  height: auto;
-}
-
-body.dark .rabbit-icon { filter: brightness(10); }
+.rabbit-icon { height: 20px; }
 
 #speed-slider {
   flex: 1;
