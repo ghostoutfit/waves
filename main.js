@@ -63,6 +63,14 @@ const SLINKY_OFF = 80;    // px — left margin, equilibrium x of first particle
 const SLINKY_SP  = 8;     // px — horizontal equilibrium spacing between particles
 let sN = 0;
 let sCur = null, sPrev = null, sNext = null;
+// Sub-vertices per quarter coil-pitch when drawing the slinky wire. Higher =
+// smoother curve but more per-frame vertex allocation (each vertex is an object
+// built every frame). 14 is visually indistinguishable from the old 100 with
+// round line joins. Tunable live via the hidden dev panel (type "dev").
+let SLINKY_SUB = 14;
+// Cached layout read: the controls panel's bottom edge. Recomputed only on
+// resize so drawSlinky() doesn't force a synchronous reflow every frame.
+let controlsBottom = 0;
 let sPhase = 0;
 let sAmp   = AMP_VALUES[0]; // tracks targetAmplitude with smooth lag
 
@@ -453,6 +461,9 @@ function resize() {
     sPrev = new Float32Array(sN);
     sNext = new Float32Array(sN);
   }
+
+  const ctrl = document.getElementById('controls');
+  if (ctrl) controlsBottom = ctrl.getBoundingClientRect().bottom;
 }
 
 // ── Simulation step ──────────────────────────────────────────
@@ -628,7 +639,6 @@ function drawSlinky(alpha) {
   if (!sCur) return;
   const W  = canvas.width;
   const H  = canvas.height;
-  const controlsBottom = document.getElementById('controls').getBoundingClientRect().bottom;
   const cy = (controlsBottom + H) / 2;
 
   ctx.clearRect(0, 0, W, H);
@@ -671,7 +681,7 @@ function drawSlinky(alpha) {
 
   // In triangle mode: 1 vertex per quarter-pitch (3 pts per half-cycle).
   // In smooth mode:  10 sub-vertices per quarter-pitch for a curved path.
-  const SUB      = 100;
+  const SUB      = SLINKY_SUB;
   const step     = quarterPitch / SUB;   // equilibrium spacing between vertices
   const hcStride = 2 * SUB;             // vertex count per half-cycle
 
@@ -820,10 +830,9 @@ function loop() {
   if (!paused) {
     simAccum += speedFactor;
     while (simAccum >= 1) {
-      step();
-      slinkyStep();
-      updateCup();
-      updateToy();
+      // Only step the active view's simulation; the other isn't drawn.
+      if (activeView === 'slinky') { slinkyStep(); updateToy(); }
+      else                         { step();       updateCup(); }
       simAccum -= 1;
     }
   }
@@ -1222,4 +1231,58 @@ paletteCupCtx = document.getElementById('cup-palette').getContext('2d');
 paletteTieCtx = document.getElementById('tie-palette').getContext('2d');
 resize();
 window.addEventListener('resize', resize);
+
+// ── Hidden dev panel (type "dev" to toggle) ──────────────────
+// Live-tune values that are dialed against the visuals. Keeps the UI clean.
+(function devPanel() {
+  let buf = '';
+  let panel = null;
+
+  function build() {
+    panel = document.createElement('div');
+    panel.style.cssText =
+      'position:fixed;top:8px;left:8px;z-index:9999;background:rgba(20,22,28,0.92);' +
+      'color:#eee;font:12px/1.4 monospace;padding:10px 12px;border-radius:8px;' +
+      'box-shadow:0 2px 12px rgba(0,0,0,0.4);user-select:none;';
+    const label = document.createElement('div');
+    const slider = document.createElement('input');
+    slider.type = 'range'; slider.min = '2'; slider.max = '40'; slider.step = '1';
+    slider.value = String(SLINKY_SUB);
+    slider.style.width = '160px';
+    const sync = () => { label.textContent = 'SLINKY_SUB = ' + SLINKY_SUB +
+      '  (~' + Math.round(((sN - 1) * SLINKY_SP) / (COIL_PITCH / 4 / SLINKY_SUB)) + ' verts/frame)'; };
+    slider.addEventListener('input', () => { SLINKY_SUB = Number(slider.value); sync(); });
+    sync();
+    panel.appendChild(label);
+    panel.appendChild(slider);
+    document.body.appendChild(panel);
+  }
+
+  window.addEventListener('keydown', e => {
+    if (e.target && /^(INPUT|TEXTAREA)$/.test(e.target.tagName)) return;
+    buf = (buf + e.key).slice(-3).toLowerCase();
+    if (buf === 'dev') {
+      if (panel) { panel.remove(); panel = null; }
+      else build();
+    }
+  });
+})();
+
+// Console diagnostic: measures live fps + stroke calls/frame over ~1s.
+window.wavesPerf = async function () {
+  const proto = CanvasRenderingContext2D.prototype;
+  const orig = proto.stroke;
+  let strokes = 0, frames = 0, running = true;
+  proto.stroke = function (...a) { strokes++; return orig.apply(this, a); };
+  const t0 = performance.now();
+  (function cnt() { if (running) { frames++; requestAnimationFrame(cnt); } })();
+  await new Promise(r => setTimeout(r, 1000));
+  running = false; proto.stroke = orig;
+  const dt = (performance.now() - t0) / 1000;
+  const r = { view: activeView, SLINKY_SUB, fps: +(frames / dt).toFixed(1),
+    strokesPerFrame: Math.round(strokes / frames) };
+  console.table(r);
+  return r;
+};
+
 loop();
