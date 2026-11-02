@@ -1,4 +1,39 @@
-// ── Wave on a String ─────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════
+//  RAINBOW WAVE  —  two wave demos sharing one <canvas>
+// ═══════════════════════════════════════════════════════════════════════════
+//  One self-contained script: no modules, no build step, no dependencies.
+//  It runs TWO independent wave simulations; only one is shown at a time.
+//  `activeView` (declared just below) is the master switch between them, and
+//  nearly every sim / draw / input path branches on it:
+//
+//    • 'wave'   — TRANSVERSE wave on a string. Particles move up/down (y),
+//                 the wave travels left→right.   sim: step()   draw: drawWave()
+//    • 'slinky' — LONGITUDINAL wave on a slinky. Particles move left/right (x),
+//                 compressions travel left→right. sim: slinkyStep() draw: drawSlinky()
+//
+//  Both sims advance the same finite-difference wave equation over three
+//  Float32Arrays (prev / cur / next) and use a Mur absorbing boundary on the
+//  right edge, so waves leave the screen instead of reflecting back.
+//
+//  Users can drop props on the canvas (tracked separately per view):
+//    – a CUP the wave physically knocks around
+//    – green TWIST TIES that ride a chosen particle to mark its motion
+//    – freehand measurement LINES
+//
+//  ── Reading order (top → bottom) ──────────────────────────────────────────
+//     1. Core shared state & physics constants
+//     2. Per-view simulation state: string, then slinky
+//     3. Interactive prop state: cup, toy, ties, drawings
+//     4. Helpers: audio, colour, grid-snap
+//     5. Simulation: resize() (allocates the arrays), step(), slinkyStep()
+//     6. Rendering: grid, slinky view, string view, props, draw()
+//     7. Main animation loop
+//     8. Control wiring (sliders, buttons, tabs)
+//     9. Pointer / drag handling
+//    10. Init + hidden dev tools
+// ═══════════════════════════════════════════════════════════════════════════
+
+// ── Canvas ───────────────────────────────────────────────────
 const canvas = document.getElementById('canvas');
 const ctx    = canvas.getContext('2d');
 
@@ -33,6 +68,11 @@ let simAccum    = 0;
 let paused      = false;
 let darkMode    = false;
 
+// Master view switch — the single most important variable in this file.
+// 'wave' = transverse string, 'slinky' = longitudinal slinky. Every
+// simulation, render, and input handler branches on it. Defaults to slinky.
+let activeView = 'slinky';
+
 // Physics — CFL fixed; wave speed set here, never by the speed slider
 const OFFSET  = 110;    // px from left edge before first particle
 const SPACING = 10;     // px between particle centres (was 11; wave speed 264→240 px/s)
@@ -58,9 +98,19 @@ let prev = null;
 let next = null;
 let particleColors = null;
 
-// ── Slinky (vertical) simulation ─────────────────────────────
+// ── Slinky (longitudinal) simulation — state ─────────────────
+// The slinky is drawn as a horizontal coil; its wave is LONGITUDINAL, so each
+// particle's stored value is a left/right (x) displacement, not up/down.
 const SLINKY_OFF = 80;    // px — left margin, equilibrium x of first particle
 const SLINKY_SP  = 8;     // px — horizontal equilibrium spacing between particles
+
+// Slinky wave speed: twice the string's CFL, so compressions visibly outrun
+// the transverse wave. Still ≤ 1, so the finite-difference scheme stays stable.
+// (Used by slinkyStep(); kept here with the sim state it governs.)
+const SLINKY_CFL  = CFL * 2;              // = 0.8
+const SLINKY_CFL2 = SLINKY_CFL * SLINKY_CFL;
+const SLINKY_MUR  = (SLINKY_CFL - 1) / (SLINKY_CFL + 1); // Mur absorbing-boundary coeff
+
 let sN = 0;
 let sCur = null, sPrev = null, sNext = null;
 // Sub-vertices per quarter coil-pitch when drawing the slinky wire. Higher =
@@ -186,7 +236,10 @@ function particleColor(i) {
   return `hsl(${hue},100%,${darkMode ? 65 : 45}%)`;
 }
 
-// ── Cup logic ────────────────────────────────────────────────
+// ── Prop motion & sprites: cup / toy ─────────────────────────
+// `cup` is the string-view prop, `toy` the slinky-view prop; they share the
+// same cup sprite (drawCup) and the same coasting-with-friction behaviour.
+// update*() coast them after a hit; drawCup() renders; *HitTest() grab-tests.
 function cupIndex() {
   return Math.max(1, Math.min(N - 2, Math.round((cup.x - OFFSET) / SPACING)));
 }
@@ -435,7 +488,11 @@ function nearEndpoint(mx, my) {
   return null;
 }
 
-// ── Resize ───────────────────────────────────────────────────
+// ── Resize — also (re)allocates the simulation arrays ────────
+// Fits the canvas to its box, then sizes both sims to the new width. This is
+// the ONLY place the prev/cur/next Float32Arrays are created, so particle
+// counts (N for the string, sN for the slinky) are derived here. Also caches
+// the controls panel's bottom edge so per-frame draws don't force a reflow.
 function resize() {
   canvas.width  = canvas.offsetWidth;
   canvas.height = canvas.offsetHeight;
@@ -466,24 +523,34 @@ function resize() {
   if (ctrl) controlsBottom = ctrl.getBoundingClientRect().bottom;
 }
 
-// ── Simulation step ──────────────────────────────────────────
+// ── Simulation step — TRANSVERSE string ──────────────────────
+// Advances the string one tick. Standard finite-difference wave equation:
+// each particle's next position is derived from its own + its neighbours'
+// current and previous positions. Then: drive the left end (particle 0),
+// absorb at the right end, handle cup collisions, and roll the buffers.
 function step() {
+  // Interior: next = 2·cur − prev + CFL²·(curvature of neighbours)
   for (let i = 1; i < N - 1; i++) {
     next[i] = 2 * cur[i] - prev[i]
             + CFL2 * (cur[i + 1] - 2 * cur[i] + cur[i - 1]);
   }
 
+  // Left end (particle 0) is the driver. Ease amplitude toward its target so
+  // turning the driver on/off ramps smoothly instead of snapping.
   amplitude += (targetAmplitude - amplitude) * 0.05;
   phase += 2 * Math.PI * frequency * DT;
 
   if (pulsePhase >= 0) {
+    // Pulse mode: emit a single half-sine, then clamp back to rest.
     next[0]    = -selectedAmpValue * Math.sin(pulsePhase);
     pulsePhase += 2 * Math.PI * frequency * DT;
     if (pulsePhase >= Math.PI) { next[0] = 0; pulsePhase = -1; }
   } else {
+    // Continuous driver: a plain sine at the chosen amplitude + frequency.
     next[0] = amplitude * Math.sin(phase);
   }
 
+  // Right end: Mur absorbing boundary — waves exit cleanly, no reflection.
   next[N - 1] = cur[N - 2] + MUR * (next[N - 2] - cur[N - 1]);
 
   // ── Toy collision (string mode) ───────────────────────────
@@ -521,13 +588,17 @@ function step() {
     if (Math.abs(next[i]) < 0.15 && Math.abs(cur[i]) < 0.15) next[i] = 0;
   }
 
+  // Roll the buffers: cur→prev, next→cur, and reuse the old prev as next.
   const tmp = prev;
   prev = cur;
   cur  = next;
   next = tmp;
 }
 
-// ── Slinky step ──────────────────────────────────────────────
+// ── Simulation step — LONGITUDINAL slinky ────────────────────
+// Same wave equation and buffer-roll as step(), but on the slinky arrays and
+// with the faster slinky CFL. Here each value is an x (left/right) displacement.
+// Drives the left end, absorbs on the right, and handles cup collisions.
 function slinkyStep() {
   if (!sCur) return;
   for (let i = 1; i < sN - 1; i++) {
@@ -574,7 +645,9 @@ function slinkyStep() {
   const t = sPrev; sPrev = sCur; sCur = sNext; sNext = t;
 }
 
-// ── Grid ─────────────────────────────────────────────────────
+// ── Grid (shared by both views) ──────────────────────────────
+// Minor + major gridlines plus the equilibrium line, drawn under everything.
+// `cy` is the vertical centre; the slinky passes its own, the string defaults it.
 function drawGrid(cy) {
   const W = canvas.width, H = canvas.height;
   if (cy === undefined) cy = H / 2 + CY_OFFSET;
@@ -614,12 +687,13 @@ function drawGrid(cy) {
   ctx.restore();
 }
 
-// ── Slinky view ──────────────────────────────────────────────
-// Side view of a horizontal slinky driven by a vertical pusher plate on the left.
-// Longitudinal wave: pusher oscillates left-right (parallel to slinky axis),
-// creating compression/rarefaction that propagates to the right.
-// Each particle's x-displacement is longitudinal; coil loops drawn in y
-// so that bunching/spreading of loops reveals the compression wave.
+// ── Slinky view (rendering) ──────────────────────────────────
+// Side view of a horizontal slinky driven by a pusher plate on the left that
+// slides left-right along a fixed rail. The pusher oscillates parallel to the
+// slinky axis, creating compressions/rarefactions that propagate rightward.
+// Each particle's x-displacement is longitudinal; coil loops are drawn with a
+// fixed vertical extent, so the bunching/spreading of loops reveals the wave.
+// (Physics constants live up in the slinky-sim state block; these are visual.)
 const COIL_PITCH  = 60;  // px — one coil turn (equilibrium horizontal space)
 const COIL_R      = 132; // px — coil half-height (vertical extent per turn)
 
@@ -627,13 +701,6 @@ const COIL_R      = 132; // px — coil half-height (vertical extent per turn)
 const RAIL_X      = 24;  // px — x of the fixed vertical guide rail
 const PUSHER_W    = 5;   // px — half-width of the pusher plate
 const PUSHER_H    = COIL_R + 10;  // px — half-height of pusher plate
-
-// Slinky wave speed: double the main CFL so compressions travel faster
-const SLINKY_CFL  = CFL * 2;              // = 0.8 (still CFL-stable)
-const SLINKY_CFL2 = SLINKY_CFL * SLINKY_CFL;
-const SLINKY_MUR  = (SLINKY_CFL - 1) / (SLINKY_CFL + 1); // Mur ABC for slinky
-
-let activeView = 'slinky';
 
 function drawSlinky(alpha) {
   if (!sCur) return;
@@ -777,8 +844,10 @@ function drawSlinky(alpha) {
   drawDrawings();
 }
 
-// ── Draw ─────────────────────────────────────────────────────
-// alpha: fraction through current step interval (0–1) for interpolation
+// ── String view (rendering) ──────────────────────────────────
+// Draws the transverse string: background, grid, driver stick, the row of
+// coloured particles, then props. alpha = fraction through the current step
+// interval (0–1), used to interpolate particle positions for smooth motion.
 function drawWave(alpha) {
   const W  = canvas.width;
   const H  = canvas.height;
@@ -820,12 +889,18 @@ function drawWave(alpha) {
   drawPaletteItems();
 }
 
+// Render dispatcher — the single entry point the loop calls each frame.
 function draw(alpha) {
   if (activeView === 'slinky') drawSlinky(alpha);
   else                         drawWave(alpha);
 }
 
-// ── Loop ─────────────────────────────────────────────────────
+// ── Main animation loop ──────────────────────────────────────
+// Runs once per display frame via requestAnimationFrame. `speedFactor`
+// (set by the turtle↔rabbit slider) is how many physics steps to run per
+// frame: at 1.0 we step once a frame; slower, we accumulate fractional steps
+// and only advance when enough has built up. The leftover fraction (simAccum)
+// is passed to draw() so rendering interpolates smoothly between steps.
 function loop() {
   if (!paused) {
     simAccum += speedFactor;
@@ -840,7 +915,10 @@ function loop() {
   requestAnimationFrame(loop);
 }
 
-// ── Controls ─────────────────────────────────────────────────
+// ── Control wiring (sliders, buttons, tabs) ──────────────────
+// Everything below connects a DOM control to the state variables above.
+// setupTrack() builds a reusable notched slider (used for amplitude + frequency);
+// the rest are one-off button/toggle listeners.
 function setupTrack(trackId, valuesId, values, initial, onChange, labels) {
   const track   = document.getElementById(trackId);
   const notches = track.querySelectorAll('.notch');
@@ -967,7 +1045,11 @@ document.getElementById('clear-all-btn').addEventListener('click', () => {
   }
 });
 
-// ── Drag handling ─────────────────────────────────────────────
+// ── Pointer / drag handling ──────────────────────────────────
+// Mouse interaction for the canvas props. Priority order on mousedown:
+// draw-mode handles → ties → cup/toy. Palette canvases spawn new props;
+// mousemove drags them; mouseup snaps ties to a particle or returns a prop
+// to the palette if dropped off-canvas. All coords go through canvasMouse().
 function canvasMouse(e) {
   const r = canvas.getBoundingClientRect();
   return [
