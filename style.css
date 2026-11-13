@@ -25,8 +25,8 @@ body.dark {
   --bg:             #111;
   --panel-bg:       rgba(18,18,20,0.90);
   --panel-border:   rgba(255,255,255,0.12);
-  --label:          #999;
-  --value:          #888;
+  --label:          #c8c8c8;   /* text: headings, button + palette labels (~11:1 on the panel) */
+  --value:          #bdbdbd;   /* text: slider values (~10:1) */
   --track-line:     #444;
   --notch-bg:       #1a1a1c;
   --notch-border:   #666;
@@ -39,7 +39,7 @@ body.dark {
   --btn-hover-bg:   rgba(255,255,255,0.07);
   --btn-active-bg:  #ddd;
   --btn-active-fg:  #111;
-  --frac-border:    #888;
+  --frac-border:    #bdbdbd;   /* fraction bar — matches the values */
 }
 
 body {
